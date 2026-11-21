@@ -1,12 +1,12 @@
-/* Influencer Blur Lab — Plain-English Interactive Visual QA Studio */
+/* Influencer Blur Lab — Full-Screen Responsive Visual QA Studio */
 
 const STAGE_META = [
-  { key: "original", label: "Original", toggleField: null },
-  { key: "stage1", label: "1. Missed Focus", toggleField: "s1_enabled" },
-  { key: "stage2", label: "2. Motion & Flash", toggleField: "s2_enabled" },
-  { key: "stage3", label: "3. Dirty Lens Glow", toggleField: "s3_enabled" },
-  { key: "stage4", label: "4. Nighttime Grain", toggleField: "s4_enabled" },
-  { key: "stage5", label: "5. Instagram Polish", toggleField: "s5_enabled" },
+  { key: "original", label: "Original", shortLabel: "Original", toggleField: null },
+  { key: "stage1", label: "1. Missed Focus", shortLabel: "1. Focus", toggleField: "s1_enabled" },
+  { key: "stage2", label: "2. Motion & Flash", shortLabel: "2. Motion", toggleField: "s2_enabled" },
+  { key: "stage3", label: "3. Dirty Lens Glow", shortLabel: "3. Glow", toggleField: "s3_enabled" },
+  { key: "stage4", label: "4. Nighttime Grain", shortLabel: "4. Grain", toggleField: "s4_enabled" },
+  { key: "stage5", label: "5. Instagram Polish", shortLabel: "5. Final", toggleField: "s5_enabled" },
 ];
 
 const state = {
@@ -23,6 +23,7 @@ const state = {
   viewMode: "side", // "side" | "wipe"
   zoomed: false,
   showdownZoomed: false,
+  allExpanded: false,
   brushMode: "off", // "off" | "sharp" | "blur"
   brushHasStrokes: false,
   isPainting: false,
@@ -31,10 +32,9 @@ const state = {
   showdownResults: null,
 };
 
-// ---------- DOM Helpers ----------
 const $ = (id) => document.getElementById(id);
 
-function showToast(msg, duration = 2600) {
+function showToast(msg, duration = 2400) {
   const el = $("toast");
   el.textContent = msg;
   el.classList.remove("hidden");
@@ -50,6 +50,77 @@ function setStatus(text, show = true) {
 
 function deepClone(obj) {
   return JSON.parse(JSON.stringify(obj));
+}
+
+// ---------- Bulletproof Viewport Image Sizing (NEVER crops or overflows on any monitor!) ----------
+function fitStageImages() {
+  if (!state.previewWidth || !state.previewHeight) return;
+
+  const aspect = state.previewWidth / state.previewHeight;
+
+  const sizeStack = (viewport, stack, pad = 12) => {
+    if (!viewport || !stack) return;
+    if (state.zoomed) {
+      stack.style.width = `${state.previewWidth}px`;
+      stack.style.height = `${state.previewHeight}px`;
+      return;
+    }
+    const availW = Math.max(40, viewport.clientWidth - pad);
+    const availH = Math.max(40, viewport.clientHeight - pad);
+    let fitW = availW;
+    let fitH = fitW / aspect;
+    if (fitH > availH) {
+      fitH = availH;
+      fitW = fitH * aspect;
+    }
+    stack.style.width = `${Math.floor(fitW)}px`;
+    stack.style.height = `${Math.floor(fitH)}px`;
+  };
+
+  if (state.viewMode === "side") {
+    sizeStack($("leftViewport"), $("leftStack"), 12);
+    sizeStack($("rightViewport"), $("rightStack"), 12);
+  } else {
+    sizeStack($("wipeViewport"), $("wipeStack"), 16);
+  }
+}
+
+// ---------- Accordion Sidebar (Zero-scroll ergonomics) ----------
+function openAccordionStage(stageKey) {
+  if (state.allExpanded) return;
+  const target = stageKey === "original" ? "stage2" : stageKey;
+  document.querySelectorAll(".acc-card").forEach((card) => {
+    card.classList.toggle("open", card.dataset.stageCard === target);
+  });
+}
+
+function setupAccordion() {
+  document.querySelectorAll(".acc-head").forEach((head) => {
+    head.addEventListener("click", (e) => {
+      // Don't collapse/expand when user clicks the ON/OFF toggle switch
+      if (e.target.closest(".switch")) return;
+      const card = head.closest(".acc-card");
+      if (state.allExpanded) {
+        card.classList.toggle("open");
+        return;
+      }
+      const wasOpen = card.classList.contains("open");
+      document.querySelectorAll(".acc-card").forEach((c) => c.classList.remove("open"));
+      if (!wasOpen) card.classList.add("open");
+    });
+  });
+
+  $("expandAllBtn").addEventListener("click", () => {
+    state.allExpanded = !state.allExpanded;
+    $("expandAllBtn").textContent = state.allExpanded ? "Compact" : "Show all";
+    document.querySelectorAll(".acc-card").forEach((card) => {
+      if (state.allExpanded) {
+        card.classList.add("open");
+      } else {
+        card.classList.toggle("open", card.dataset.stageCard === (state.selectedStage === "original" ? "stage2" : state.selectedStage));
+      }
+    });
+  });
 }
 
 // ---------- Presets ----------
@@ -88,15 +159,13 @@ function renderPresetBar() {
       del.addEventListener("click", async (e) => {
         e.stopPropagation();
         await fetch(`/api/presets/${encodeURIComponent(p.id)}`, { method: "DELETE" });
-        showToast(`Deleted preset "${p.name}"`);
+        showToast(`Deleted "${p.name}"`);
         await loadPresets();
       });
       btn.appendChild(del);
     }
 
-    btn.addEventListener("click", () => {
-      applyPresetToState(p, true);
-    });
+    btn.addEventListener("click", () => applyPresetToState(p, true));
     container.appendChild(btn);
   }
 }
@@ -105,7 +174,6 @@ function applyPresetToState(preset, triggerProcess = true) {
   state.activePresetId = preset.id;
   state.config = deepClone(preset.config);
   $("activeLookTitle").textContent = preset.name;
-  $("activeLookDesc").textContent = preset.description || "Custom saved look";
   syncControlsFromConfig();
   renderPresetBar();
   if (triggerProcess && state.imageId) {
@@ -118,13 +186,11 @@ function syncControlsFromConfig() {
   const c = state.config;
   if (!c) return;
 
-  // Stage 1
   $("s1_enabled").checked = c.stage1_focus.enabled;
   $("s1_radius").value = c.stage1_focus.radius;
   $("s1_falloff_mode").value = c.stage1_focus.falloff_mode;
   $("s1_falloff_strength").value = Math.round(c.stage1_focus.falloff_strength * 100);
 
-  // Stage 2
   $("s2_enabled").checked = c.stage2_motion.enabled;
   $("s2_method").value = c.stage2_motion.method;
   $("s2_shake_amount").value = c.stage2_motion.shake_amount;
@@ -135,20 +201,17 @@ function syncControlsFromConfig() {
   $("s2_swing_intensity").value = Math.round(c.stage2_motion.swing_intensity * 100);
   $("s2_direction_angle").value = Math.round(c.stage2_motion.direction_angle);
 
-  // Stage 3
   $("s3_enabled").checked = c.stage3_optics.enabled;
   $("s3_glow_amount").value = Math.round(c.stage3_optics.glow_amount * 100);
   $("s3_haze_lift").value = Math.round(c.stage3_optics.haze_lift * 100);
   $("s3_warmth").value = Math.round(c.stage3_optics.warmth * 100);
   $("s3_edge_fringing").value = Math.round(c.stage3_optics.edge_fringing * 100);
 
-  // Stage 4
   $("s4_enabled").checked = c.stage4_grain.enabled;
   $("s4_grain_amount").value = Math.round(c.stage4_grain.grain_amount * 100);
   $("s4_clumpiness").value = Math.round(c.stage4_grain.clumpiness * 100);
   $("s4_isp_smoothing").value = Math.round(c.stage4_grain.isp_smoothing * 100);
 
-  // Stage 5
   $("s5_enabled").checked = c.stage5_compression.enabled;
   $("s5_insta_softness").value = Math.round(c.stage5_compression.insta_softness * 100);
   $("s5_jpeg_quality").value = Math.round(c.stage5_compression.jpeg_quality);
@@ -227,7 +290,6 @@ function updateControlReadoutsAndVisibility() {
   $("val_s5_soft").textContent = `${$("s5_insta_softness").value}%`;
   $("val_s5_qual").textContent = $("s5_jpeg_quality").value;
 
-  // Dim disabled stage cards
   const toggles = [
     ["stage1", "s1_enabled"],
     ["stage2", "s2_enabled"],
@@ -247,7 +309,7 @@ function scheduleAutoProcess() {
   clearTimeout(state.debounceTimer);
   state.debounceTimer = setTimeout(() => {
     processCurrentPhoto();
-  }, 360);
+  }, 340);
 }
 
 // ---------- Upload ----------
@@ -255,7 +317,7 @@ async function uploadFile(file) {
   if (!file) return;
   const form = new FormData();
   form.append("file", file);
-  setStatus("Uploading photo…");
+  setStatus("Uploading…");
 
   try {
     const resp = await fetch("/api/upload", { method: "POST", body: form });
@@ -274,8 +336,9 @@ async function uploadFile(file) {
     $("downloadBtn").disabled = false;
     switchTab(state.activeTab);
 
+    requestAnimationFrame(() => fitStageImages());
     await processCurrentPhoto();
-    showToast(`Loaded "${data.filename}" (${data.full_width}×${data.full_height})`);
+    showToast(`Loaded "${data.filename}"`);
   } catch (err) {
     setStatus("Upload error");
     showToast(err.message);
@@ -287,7 +350,7 @@ async function processCurrentPhoto() {
   if (!state.imageId || !state.config) return;
   state.isProcessing = true;
   $("loadingOverlay").classList.remove("hidden");
-  setStatus("Processing…");
+  setStatus("Updating…");
 
   try {
     const payload = {
@@ -308,9 +371,10 @@ async function processCurrentPhoto() {
     state.stages = data.stages;
     renderFilmstrip();
     updateViewerImages();
+    requestAnimationFrame(() => fitStageImages());
 
     const sec = (data.total_ms / 1000).toFixed(2);
-    setStatus(`Ready in ${sec}s`);
+    setStatus(`${sec}s`);
 
     const noteBanner = $("noteBanner");
     if (data.notes && data.notes.length > 0) {
@@ -328,7 +392,7 @@ async function processCurrentPhoto() {
   }
 }
 
-// ---------- Filmstrip ----------
+// ---------- Bottom Filmstrip ----------
 function renderFilmstrip() {
   const strip = $("filmstrip");
   strip.innerHTML = "";
@@ -340,6 +404,7 @@ function renderFilmstrip() {
       "film-card" +
       (state.selectedStage === meta.key ? " active" : "") +
       (!isEnabled ? " is-off" : "");
+    card.title = meta.label;
 
     const thumbWrap = document.createElement("div");
     thumbWrap.className = "film-thumb-wrap";
@@ -349,13 +414,13 @@ function renderFilmstrip() {
     img.alt = meta.label;
     thumbWrap.appendChild(img);
 
-    const row = document.createElement("div");
-    row.className = "film-meta";
+    const info = document.createElement("div");
+    info.className = "film-info";
 
     const title = document.createElement("span");
     title.className = "film-title";
-    title.textContent = meta.label;
-    row.appendChild(title);
+    title.textContent = meta.shortLabel;
+    info.appendChild(title);
 
     if (meta.toggleField) {
       const tgl = document.createElement("button");
@@ -369,16 +434,19 @@ function renderFilmstrip() {
         readControlsIntoConfig();
         processCurrentPhoto();
       });
-      row.appendChild(tgl);
+      info.appendChild(tgl);
     }
 
     card.appendChild(thumbWrap);
-    card.appendChild(row);
+    card.appendChild(info);
 
     card.addEventListener("click", () => {
       state.selectedStage = meta.key;
       renderFilmstrip();
       updateViewerImages();
+      if (meta.key !== "original") {
+        openAccordionStage(meta.key);
+      }
     });
     strip.appendChild(card);
   }
@@ -405,6 +473,7 @@ function setViewMode(mode) {
   $("modeWipeBtn").classList.toggle("active", mode === "wipe");
   $("sideBySideView").classList.toggle("hidden", mode !== "side");
   $("wipeView").classList.toggle("hidden", mode !== "wipe");
+  requestAnimationFrame(() => fitStageImages());
 }
 
 function toggleZoom() {
@@ -413,9 +482,22 @@ function toggleZoom() {
   $("leftViewport").classList.toggle("zoomed", state.zoomed);
   $("rightViewport").classList.toggle("zoomed", state.zoomed);
   $("wipeViewport").classList.toggle("zoomed", state.zoomed);
+  requestAnimationFrame(() => {
+    fitStageImages();
+    if (state.zoomed) {
+      // Center zoomed view on upper-middle portrait face area automatically!
+      const centerZoom = (vp) => {
+        if (!vp) return;
+        vp.scrollLeft = Math.max(0, (state.previewWidth - vp.clientWidth) * 0.5);
+        vp.scrollTop = Math.max(0, (state.previewHeight - vp.clientHeight) * 0.25);
+      };
+      centerZoom($("leftViewport"));
+      centerZoom($("rightViewport"));
+      centerZoom($("wipeViewport"));
+    }
+  });
 }
 
-// Sync scrolling between left & right panes when in 100% Zoom
 function setupSyncedPanning() {
   const left = $("leftViewport");
   const right = $("rightViewport");
@@ -458,7 +540,6 @@ function setupSyncedPanning() {
   bindSync(right, left);
 }
 
-// Interactive Wipe Slider
 function setupWipeSlider() {
   const stack = $("wipeStack");
   const clip = $("wipeClip");
@@ -595,7 +676,6 @@ function buildShowdownOptions() {
     }));
   }
 
-  // Default: compare all 3 motion methods on current look settings
   const base = deepClone(state.config);
   const optA = deepClone(base);
   optA.name = "Handheld Micro-Shake";
@@ -619,17 +699,17 @@ function buildShowdownOptions() {
   return [
     {
       label: "Option A — Handheld Shake",
-      subtitle: "Whole-frame curved shutter shake with subtle double-image ghosting",
+      subtitle: "Whole-frame curved shake + subtle ghosting",
       config: optA,
     },
     {
       label: "Option B — Flash Party Drag",
-      subtitle: "Face stays crisp from flash while background & outer edges trail",
+      subtitle: "Crisp flash face + trailing edges",
       config: optB,
     },
     {
       label: "Option C — Moving Hands Swing",
-      subtitle: "Face stays sharp while arms & hands arc naturally in motion",
+      subtitle: "Sharp face + swinging arms & hands",
       config: optC,
     },
   ];
@@ -638,8 +718,8 @@ function buildShowdownOptions() {
 async function runShowdown() {
   if (!state.imageId || !state.config) return;
   const grid = $("showdownGrid");
-  grid.innerHTML = `<div style="grid-column:1/-1;display:flex;align-items:center;justify-content:center;gap:12px;color:var(--text-muted);"><div class="spinner"></div><span>Building 3 showdown options…</span></div>`;
-  setStatus("Running Showdown…");
+  grid.innerHTML = `<div style="grid-column:1/-1;display:flex;align-items:center;justify-content:center;gap:10px;color:var(--text-muted);"><div class="spinner"></div><span>Building 3 showdown options…</span></div>`;
+  setStatus("Showdown…");
 
   try {
     const resp = await fetch("/api/showdown", {
@@ -658,11 +738,11 @@ async function runShowdown() {
     const data = await resp.json();
     state.showdownResults = data;
     renderShowdownGrid(data);
-    setStatus(`Showdown ready in ${(data.total_ms / 1000).toFixed(2)}s`);
+    setStatus(`${(data.total_ms / 1000).toFixed(2)}s`);
   } catch (err) {
     grid.innerHTML = "";
     showToast(err.message);
-    setStatus("Showdown error");
+    setStatus("Error");
   }
 }
 
@@ -670,24 +750,22 @@ function renderShowdownGrid(data) {
   const grid = $("showdownGrid");
   grid.innerHTML = "";
 
-  // Card 0: Original
   const origCard = document.createElement("div");
   origCard.className = "showdown-card";
   origCard.innerHTML = `
     <div class="showdown-card-head">
-      <div class="showdown-card-title">Original Photo</div>
-      <div class="showdown-card-sub">Reference before any blur or night optics</div>
+      <div class="showdown-card-title">Original</div>
+      <div class="showdown-card-sub">Before blur &amp; night optics</div>
     </div>
     <div class="showdown-img-wrap ${state.showdownZoomed ? "zoomed" : ""}">
       <img src="${data.original_url}" alt="Original" />
     </div>
     <div class="showdown-card-foot">
-      <span class="showdown-time">Unedited</span>
+      <span class="showdown-time">Reference</span>
     </div>
   `;
   grid.appendChild(origCard);
 
-  // Cards A, B, C
   for (const opt of data.options) {
     const card = document.createElement("div");
     card.className = "showdown-card";
@@ -701,14 +779,13 @@ function renderShowdownGrid(data) {
       </div>
       <div class="showdown-card-foot">
         <span class="showdown-time">${(opt.total_ms / 1000).toFixed(2)}s</span>
-        <button class="btn btn-primary btn-sm pick-btn">Pick Winner</button>
+        <button class="btn btn-primary btn-xs pick-btn">Pick Winner</button>
       </div>
     `;
     card.querySelector(".pick-btn").addEventListener("click", () => {
       state.config = deepClone(opt.config);
       state.activePresetId = "";
       $("activeLookTitle").textContent = opt.label;
-      $("activeLookDesc").textContent = opt.subtitle;
       syncControlsFromConfig();
       renderPresetBar();
       switchTab("qa");
@@ -737,7 +814,9 @@ function switchTab(tab) {
   $("tab-qa").classList.toggle("hidden", tab !== "qa");
   $("tab-showdown").classList.toggle("hidden", tab !== "showdown");
 
-  if (tab === "showdown") {
+  if (tab === "qa") {
+    requestAnimationFrame(() => fitStageImages());
+  } else if (tab === "showdown") {
     runShowdown();
   }
 }
@@ -747,7 +826,7 @@ async function downloadFinalResult() {
   if (!state.imageId || !state.config) return;
   const btn = $("downloadBtn");
   btn.disabled = true;
-  btn.textContent = "Preparing Full-Res…";
+  btn.textContent = "Saving…";
   try {
     const resp = await fetch("/api/download", {
       method: "POST",
@@ -775,11 +854,11 @@ async function downloadFinalResult() {
     showToast(err.message);
   } finally {
     btn.disabled = false;
-    btn.textContent = "Download Final Result";
+    btn.textContent = "Download";
   }
 }
 
-// ---------- Modals (Save Preset & Settings) ----------
+// ---------- Modals ----------
 async function openSettingsModal() {
   const resp = await fetch("/api/settings");
   const data = await resp.json();
@@ -836,17 +915,17 @@ async function saveCustomPreset() {
   state.activePresetId = saved.id;
   $("activeLookTitle").textContent = saved.name;
   renderPresetBar();
-  showToast(`Saved preset "${saved.name}"!`);
+  showToast(`Saved "${saved.name}"!`);
 }
 
 // ---------- Bootstrap ----------
 function bindEvents() {
-  // Tabs
+  setupAccordion();
+
   document.querySelectorAll(".tab-btn").forEach((btn) => {
     btn.addEventListener("click", () => switchTab(btn.dataset.tab));
   });
 
-  // File input + drag & drop anywhere
   $("fileInput").addEventListener("change", (e) => {
     if (e.target.files && e.target.files[0]) {
       uploadFile(e.target.files[0]);
@@ -858,13 +937,13 @@ function bindEvents() {
   ["dragenter", "dragover"].forEach((ev) => {
     document.body.addEventListener(ev, (e) => {
       e.preventDefault();
-      dz.classList.add("drag-over");
+      if (dz) dz.classList.add("drag-over");
     });
   });
   ["dragleave", "drop"].forEach((ev) => {
     document.body.addEventListener(ev, (e) => {
       e.preventDefault();
-      dz.classList.remove("drag-over");
+      if (dz) dz.classList.remove("drag-over");
     });
   });
   document.body.addEventListener("drop", (e) => {
@@ -874,23 +953,20 @@ function bindEvents() {
     }
   });
 
-  // View controls
   $("modeSideBtn").addEventListener("click", () => setViewMode("side"));
   $("modeWipeBtn").addEventListener("click", () => setViewMode("wipe"));
   $("zoomBtn").addEventListener("click", toggleZoom);
 
-  // Brush controls
   document.querySelectorAll(".brush-btn").forEach((btn) => {
     btn.addEventListener("click", () => setBrushMode(btn.dataset.brush));
   });
   $("clearBrushBtn").addEventListener("click", () => {
     if (!state.previewWidth) return;
     initBrushCanvases(state.previewWidth, state.previewHeight);
-    showToast("Cleared painted focus brush");
+    showToast("Cleared painted brush");
     if (state.imageId) processCurrentPhoto();
   });
 
-  // Controls inputs
   const controlIds = [
     "s1_enabled", "s1_radius", "s1_falloff_mode", "s1_falloff_strength",
     "s2_enabled", "s2_method", "s2_shake_amount", "s2_ghost_strength",
@@ -917,7 +993,6 @@ function bindEvents() {
     processCurrentPhoto();
   });
 
-  // Showdown
   $("runShowdownBtn").addEventListener("click", runShowdown);
   $("showdownModeSelect").addEventListener("change", () => {
     if (state.imageId && state.activeTab === "showdown") runShowdown();
@@ -930,10 +1005,8 @@ function bindEvents() {
     });
   });
 
-  // Download
   $("downloadBtn").addEventListener("click", downloadFinalResult);
 
-  // Modals
   $("savePresetBtn").addEventListener("click", () => {
     $("presetModal").classList.remove("hidden");
     $("presetNameInput").focus();
@@ -943,6 +1016,32 @@ function bindEvents() {
   $("saveSettingsBtn").addEventListener("click", saveSettings);
   document.querySelectorAll("[data-close-modal]").forEach((btn) => {
     btn.addEventListener("click", () => $(btn.dataset.closeModal).classList.add("hidden"));
+  });
+
+  // Auto-refit images smoothly whenever the browser window resizes
+  window.addEventListener("resize", () => requestAnimationFrame(() => fitStageImages()));
+  if (typeof ResizeObserver !== "undefined") {
+    const ro = new ResizeObserver(() => requestAnimationFrame(() => fitStageImages()));
+    ro.observe($("viewerStage"));
+  }
+
+  // Handy keyboard shortcuts (ignored when typing in inputs)
+  window.addEventListener("keydown", (e) => {
+    if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) return;
+    if (!state.imageId) return;
+    if (e.key === "z" || e.key === "Z") {
+      toggleZoom();
+    } else if (e.key >= "1" && e.key <= "5") {
+      const k = `stage${e.key}`;
+      state.selectedStage = k;
+      renderFilmstrip();
+      updateViewerImages();
+      openAccordionStage(k);
+    } else if (e.key === "0") {
+      state.selectedStage = "original";
+      renderFilmstrip();
+      updateViewerImages();
+    }
   });
 
   setupSyncedPanning();

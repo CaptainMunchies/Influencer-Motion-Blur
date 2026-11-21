@@ -4,36 +4,42 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Influencer Blur Lab</title>
-  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/styles.css?v=2" />
 </head>
 <body>
-  <!-- Top Studio Header -->
+  <!-- Single Compact Studio Header (merges brand, tabs, presets & actions to maximize photo space) -->
   <header class="topbar">
-    <div class="brand">
-      <div class="brand-dot"></div>
-      <div>
-        <div class="brand-title">Influencer Blur Lab</div>
-        <div class="brand-sub">Authentic Phone Blur &amp; Night Optics Studio</div>
+    <div class="topbar-left">
+      <div class="brand">
+        <div class="brand-dot"></div>
+        <span class="brand-title">Blur Lab</span>
       </div>
+
+      <nav class="main-tabs" role="tablist">
+        <button class="tab-btn active" data-tab="qa" role="tab" aria-selected="true">
+          Step-by-Step QA
+        </button>
+        <button class="tab-btn" data-tab="showdown" role="tab" aria-selected="false">
+          Option Showdown
+        </button>
+      </nav>
     </div>
 
-    <nav class="main-tabs" role="tablist">
-      <button class="tab-btn active" data-tab="qa" role="tab" aria-selected="true">
-        Step-by-Step QA
+    <div class="topbar-center">
+      <div id="presetList" class="preset-pills"></div>
+      <button id="savePresetBtn" class="btn btn-ghost btn-xs" title="Save your current sliders as a reusable preset">
+        + Save Look
       </button>
-      <button class="tab-btn" data-tab="showdown" role="tab" aria-selected="false">
-        Option Showdown
-      </button>
-    </nav>
+    </div>
 
-    <div class="topbar-actions">
+    <div class="topbar-right">
       <span id="statusPill" class="status-pill hidden">Ready</span>
-      <label class="btn btn-secondary upload-label" for="fileInput">
-        Upload Photo
+      <label class="btn btn-secondary btn-sm upload-label" for="fileInput">
+        Upload
       </label>
       <input id="fileInput" type="file" accept="image/jpeg,image/png,image/webp" hidden />
-      <button id="downloadBtn" class="btn btn-primary" disabled>
-        Download Final Result
+      <button id="downloadBtn" class="btn btn-primary btn-sm" disabled>
+        Download
       </button>
       <button id="settingsBtn" class="btn btn-icon" title="Optional Cloud AI Settings" aria-label="Settings">
         ⚙
@@ -41,25 +47,12 @@
     </div>
   </header>
 
-  <!-- Preset Strip -->
-  <section class="preset-bar">
-    <div class="preset-bar-left">
-      <span class="preset-bar-label">Quick Looks:</span>
-      <div id="presetList" class="preset-pills"></div>
-    </div>
-    <div class="preset-bar-right">
-      <button id="savePresetBtn" class="btn btn-ghost btn-sm">
-        + Save My Preset
-      </button>
-    </div>
-  </section>
-
   <!-- Global Empty Dropzone (shown before first photo upload) -->
   <main id="emptyState" class="empty-state">
     <div id="dropzone" class="dropzone">
       <div class="dropzone-icon">📸</div>
-      <h1>Drop a photo here to start testing</h1>
-      <p>Supports JPG, PNG, and WebP. Runs fast right on your computer — no cloud account needed.</p>
+      <h1>Drop a photo anywhere to start</h1>
+      <p>Supports JPG, PNG, and WebP. Runs fast right on your PC — no cloud account needed.</p>
       <label class="btn btn-primary btn-lg upload-label" for="fileInput">
         Choose a Photo
       </label>
@@ -73,37 +66,29 @@
 
   <!-- TAB 1: STEP-BY-STEP QA -->
   <main id="tab-qa" class="workspace hidden">
-    <div class="qa-main">
-      <!-- Filmstrip (Original + Stages 1..5 with individual ON/OFF toggles) -->
-      <div class="filmstrip-wrap">
-        <div id="filmstrip" class="filmstrip"></div>
-      </div>
-
-      <!-- Viewer Toolbar -->
+    <section class="qa-stage-col">
+      <!-- Slim Single-Row Viewer Toolbar -->
       <div class="viewer-toolbar">
         <div class="toolbar-group">
-          <button id="modeSideBtn" class="seg-btn active">Side-by-Side</button>
-          <button id="modeWipeBtn" class="seg-btn">Wipe Slider</button>
-          <button id="zoomBtn" class="seg-btn">100% Zoom</button>
+          <button id="modeSideBtn" class="seg-btn active" title="Compare Original and Selected Stage side-by-side">Side-by-Side</button>
+          <button id="modeWipeBtn" class="seg-btn" title="Drag divider left and right">Wipe Slider</button>
+          <button id="zoomBtn" class="seg-btn" title="Inspect pixels 1:1 (Shortcut: Z)">100% Zoom</button>
         </div>
 
         <div class="toolbar-group brush-group">
-          <span class="toolbar-label">Focus Brush:</span>
+          <span class="toolbar-label">Brush:</span>
           <button class="brush-btn active" data-brush="off">Off</button>
-          <button class="brush-btn brush-sharp" data-brush="sharp">Keep Sharp</button>
-          <button class="brush-btn brush-blur" data-brush="blur">Make Blurry</button>
-          <label class="brush-size-wrap" title="Brush Size">
-            <span>Size</span>
-            <input id="brushSizeInput" type="range" min="16" max="120" value="54" />
-          </label>
-          <button id="clearBrushBtn" class="btn btn-ghost btn-xs">Clear</button>
+          <button class="brush-btn brush-sharp" data-brush="sharp" title="Paint green over faces to keep them sharp">Keep Sharp</button>
+          <button class="brush-btn brush-blur" data-brush="blur" title="Paint red over hands or arms to blur them">Make Blurry</button>
+          <input id="brushSizeInput" class="brush-size-slider" type="range" min="18" max="120" value="54" title="Brush size" />
+          <button id="clearBrushBtn" class="btn btn-ghost btn-xxs" title="Clear painted areas">Clear</button>
         </div>
       </div>
 
-      <!-- Notice Banner (e.g. optional Cloud AI note) -->
+      <!-- Optional status notice (e.g. Cloud AI fallback info) -->
       <div id="noteBanner" class="note-banner hidden"></div>
 
-      <!-- Main Comparison Stage -->
+      <!-- Main Full-Height Photo Comparison Canvas -->
       <div id="viewerStage" class="viewer-stage">
         <!-- Side-by-Side View -->
         <div id="sideBySideView" class="side-by-side">
@@ -117,7 +102,7 @@
             </div>
           </div>
           <div class="pane">
-            <div class="pane-badge" id="rightBadge">Stage 5 — Instagram Polish</div>
+            <div class="pane-badge" id="rightBadge">5. Instagram Polish</div>
             <div class="pane-viewport" id="rightViewport">
               <div class="image-stack" id="rightStack">
                 <img id="stageImg" alt="Processed stage" draggable="false" />
@@ -144,47 +129,48 @@
           </div>
         </div>
 
-        <!-- Subtle Loading Overlay -->
-        <div id="loadingOverlay" class="loading-overlay hidden">
+        <!-- Subtle Loading Pill (doesn't cover/dim the whole photo harshly) -->
+        <div id="loadingOverlay" class="loading-pill hidden">
           <div class="spinner"></div>
-          <span>Updating photo…</span>
+          <span>Updating…</span>
         </div>
       </div>
 
-      <div id="brushHint" class="brush-hint hidden">
-        Tip: Paint <strong>green</strong> over the face to keep it sharp, or <strong>red</strong> over moving hands/arms to blur them.
+      <!-- Compact Bottom Filmstrip (Lightroom-style: maximizes photo height!) -->
+      <div class="filmstrip-bar">
+        <div id="filmstrip" class="filmstrip"></div>
       </div>
-    </div>
+    </section>
 
-    <!-- Right Controls Sidebar -->
+    <!-- Compact Accordion Controls Sidebar (Zero scrolling needed!) -->
     <aside class="controls-panel">
-      <div class="controls-header">
-        <div>
+      <div class="controls-top">
+        <div class="controls-title-row">
           <h2 id="activeLookTitle">Flash Party Blur</h2>
-          <p id="activeLookDesc" class="controls-sub">Adjust any slider below — every step updates cleanly.</p>
+          <button id="expandAllBtn" class="btn-link" title="Expand or collapse all 5 stages">Show all</button>
+        </div>
+        <div class="controls-apply-row">
+          <button id="applyBtn" class="btn btn-primary btn-sm apply-btn">Apply</button>
+          <label class="auto-toggle">
+            <input id="autoApplyCheck" type="checkbox" checked />
+            <span>Auto-update</span>
+          </label>
         </div>
       </div>
 
-      <div class="controls-apply-bar">
-        <button id="applyBtn" class="btn btn-primary btn-full">Apply Changes</button>
-        <label class="auto-toggle">
-          <input id="autoApplyCheck" type="checkbox" checked />
-          <span>Auto-update</span>
-        </label>
-      </div>
-
-      <div class="controls-scroll">
+      <div class="controls-accordion" id="controlsAccordion">
         <!-- Stage 1 -->
-        <div class="control-card" data-stage-card="stage1">
-          <div class="control-card-head">
+        <div class="acc-card" data-stage-card="stage1">
+          <div class="acc-head" data-acc-toggle="stage1">
             <span class="stage-num">1</span>
             <span class="stage-name">Missed Focus</span>
-            <label class="switch">
+            <span class="acc-chevron">▾</span>
+            <label class="switch" title="Turn Missed Focus on or off">
               <input type="checkbox" id="s1_enabled" checked />
               <span class="slider-switch"></span>
             </label>
           </div>
-          <div class="control-body">
+          <div class="acc-body">
             <div class="field">
               <div class="field-label">
                 <span>Focus Softness</span>
@@ -193,9 +179,7 @@
               <input type="range" id="s1_radius" min="0" max="14" step="0.1" value="1.35" />
             </div>
             <div class="field">
-              <div class="field-label">
-                <span>Focus Area</span>
-              </div>
+              <div class="field-label"><span>Focus Area</span></div>
               <select id="s1_falloff_mode">
                 <option value="face_center">Keep Face Sharper</option>
                 <option value="edges">Keep Center Sharper</option>
@@ -204,7 +188,7 @@
             </div>
             <div class="field" id="wrap_s1_falloff">
               <div class="field-label">
-                <span>Face Protection Strength</span>
+                <span>Face Protection</span>
                 <span class="field-val" id="val_s1_falloff">72%</span>
               </div>
               <input type="range" id="s1_falloff_strength" min="0" max="100" step="1" value="72" />
@@ -213,16 +197,17 @@
         </div>
 
         <!-- Stage 2 -->
-        <div class="control-card" data-stage-card="stage2">
-          <div class="control-card-head">
+        <div class="acc-card open" data-stage-card="stage2">
+          <div class="acc-head" data-acc-toggle="stage2">
             <span class="stage-num">2</span>
-            <span class="stage-name">Motion &amp; Flash Blur</span>
-            <label class="switch">
+            <span class="stage-name">Motion &amp; Flash</span>
+            <span class="acc-chevron">▾</span>
+            <label class="switch" title="Turn Motion & Flash on or off">
               <input type="checkbox" id="s2_enabled" checked />
               <span class="slider-switch"></span>
             </label>
           </div>
-          <div class="control-body">
+          <div class="acc-body">
             <div class="field">
               <div class="field-label"><span>Motion Style</span></div>
               <select id="s2_method">
@@ -259,7 +244,7 @@
 
             <div class="field" id="wrap_s2_outer">
               <div class="field-label">
-                <span>Moving Edges / Arms Smear</span>
+                <span>Moving Edges / Arms</span>
                 <span class="field-val" id="val_s2_outer">74%</span>
               </div>
               <input type="range" id="s2_outer_smear" min="0" max="100" step="1" value="74" />
@@ -289,23 +274,24 @@
               <input type="range" id="s2_direction_angle" min="-180" max="180" step="5" value="18" />
             </div>
 
-            <button id="rerollShakeBtn" class="btn btn-ghost btn-xs btn-full">
-              🎲 Try Different Natural Shake Pattern
+            <button id="rerollShakeBtn" class="btn btn-ghost btn-xxs btn-full">
+              🎲 New Natural Shake Pattern
             </button>
           </div>
         </div>
 
         <!-- Stage 3 -->
-        <div class="control-card" data-stage-card="stage3">
-          <div class="control-card-head">
+        <div class="acc-card" data-stage-card="stage3">
+          <div class="acc-head" data-acc-toggle="stage3">
             <span class="stage-num">3</span>
             <span class="stage-name">Dirty Lens Glow</span>
-            <label class="switch">
+            <span class="acc-chevron">▾</span>
+            <label class="switch" title="Turn Dirty Lens Glow on or off">
               <input type="checkbox" id="s3_enabled" checked />
               <span class="slider-switch"></span>
             </label>
           </div>
-          <div class="control-body">
+          <div class="acc-body">
             <div class="field">
               <div class="field-label">
                 <span>Dirty Lens Glow</span>
@@ -329,7 +315,7 @@
             </div>
             <div class="field">
               <div class="field-label">
-                <span>Subtle Edge Color Fringe</span>
+                <span>Edge Color Fringe</span>
                 <span class="field-val" id="val_s3_fringe">22%</span>
               </div>
               <input type="range" id="s3_edge_fringing" min="0" max="100" step="1" value="22" />
@@ -338,16 +324,17 @@
         </div>
 
         <!-- Stage 4 -->
-        <div class="control-card" data-stage-card="stage4">
-          <div class="control-card-head">
+        <div class="acc-card" data-stage-card="stage4">
+          <div class="acc-head" data-acc-toggle="stage4">
             <span class="stage-num">4</span>
             <span class="stage-name">Nighttime Grain</span>
-            <label class="switch">
+            <span class="acc-chevron">▾</span>
+            <label class="switch" title="Turn Nighttime Grain on or off">
               <input type="checkbox" id="s4_enabled" checked />
               <span class="slider-switch"></span>
             </label>
           </div>
-          <div class="control-body">
+          <div class="acc-body">
             <div class="field">
               <div class="field-label">
                 <span>Nighttime Grain</span>
@@ -364,7 +351,7 @@
             </div>
             <div class="field">
               <div class="field-label">
-                <span>Phone Night Smoothness</span>
+                <span>Phone Smoothness</span>
                 <span class="field-val" id="val_s4_smooth">34%</span>
               </div>
               <input type="range" id="s4_isp_smoothing" min="0" max="100" step="1" value="34" />
@@ -373,16 +360,17 @@
         </div>
 
         <!-- Stage 5 -->
-        <div class="control-card" data-stage-card="stage5">
-          <div class="control-card-head">
+        <div class="acc-card" data-stage-card="stage5">
+          <div class="acc-head" data-acc-toggle="stage5">
             <span class="stage-num">5</span>
             <span class="stage-name">Instagram Polish</span>
-            <label class="switch">
+            <span class="acc-chevron">▾</span>
+            <label class="switch" title="Turn Instagram Polish on or off">
               <input type="checkbox" id="s5_enabled" checked />
               <span class="slider-switch"></span>
             </label>
           </div>
-          <div class="control-body">
+          <div class="acc-body">
             <div class="field">
               <div class="field-label">
                 <span>Instagram Softness</span>
@@ -400,6 +388,10 @@
           </div>
         </div>
       </div>
+
+      <div id="brushHint" class="brush-tip hidden">
+        Paint <strong>green</strong> to protect a face, or <strong>red</strong> to blur moving hands.
+      </div>
     </aside>
   </main>
 
@@ -408,15 +400,15 @@
     <div class="showdown-bar">
       <div class="showdown-bar-left">
         <h2>Option Showdown</h2>
-        <p>Compare 3 blur options side-by-side against your original photo and pick the best one.</p>
+        <span class="showdown-sub">Compare 3 looks next to your original and pick the winner.</span>
       </div>
       <div class="showdown-bar-right">
         <select id="showdownModeSelect">
-          <option value="methods">Compare 3 Motion Styles (Shake vs Flash Drag vs Arm Swing)</option>
-          <option value="presets">Compare 3 Built-In Looks (Party vs Warm Night vs Gym Mirror)</option>
+          <option value="methods">3 Motion Styles (Shake vs Flash Drag vs Arm Swing)</option>
+          <option value="presets">3 Built-In Looks (Party vs Warm Night vs Gym Mirror)</option>
         </select>
         <button id="showdownZoomBtn" class="seg-btn">100% Zoom</button>
-        <button id="runShowdownBtn" class="btn btn-primary">Run Showdown</button>
+        <button id="runShowdownBtn" class="btn btn-primary btn-sm">Run Showdown</button>
       </div>
     </div>
 
@@ -441,8 +433,8 @@
         </div>
       </div>
       <div class="modal-foot">
-        <button class="btn btn-ghost" data-close-modal="presetModal">Cancel</button>
-        <button id="confirmSavePresetBtn" class="btn btn-primary">Save Preset</button>
+        <button class="btn btn-ghost btn-sm" data-close-modal="presetModal">Cancel</button>
+        <button id="confirmSavePresetBtn" class="btn btn-primary btn-sm">Save Preset</button>
       </div>
     </div>
   </div>
@@ -477,8 +469,8 @@
         </div>
       </div>
       <div class="modal-foot">
-        <button class="btn btn-ghost" data-close-modal="settingsModal">Close</button>
-        <button id="saveSettingsBtn" class="btn btn-primary">Save Settings</button>
+        <button class="btn btn-ghost btn-sm" data-close-modal="settingsModal">Close</button>
+        <button id="saveSettingsBtn" class="btn btn-primary btn-sm">Save Settings</button>
       </div>
     </div>
   </div>
@@ -486,6 +478,6 @@
   <!-- Toast Notification -->
   <div id="toast" class="toast hidden"></div>
 
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=2"></script>
 </body>
 </html>
