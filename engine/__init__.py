@@ -10,6 +10,13 @@ Zero UI / FastAPI dependencies. Embed directly into any Python web backend or Sa
     result_rgb = process_image(img, preset)
 """
 
+from .ai_director import (
+    AIDirectorResult,
+    SUGGESTED_MODELS,
+    apply_director_guidance_to_config,
+    direct_photo_with_ai,
+    list_available_vision_models,
+)
 from .masks import UserBrushMask, decode_rgba_brush_mask
 from .pipeline import PipelineResult, process_image, run_pipeline
 from .presets import (
@@ -29,24 +36,31 @@ from .schema import (
     Stage3OpticsConfig,
     Stage4GrainConfig,
     Stage5CompressionConfig,
+    VisionDirectorConfig,
 )
 from .stage2_motion import MotionProvider, register_motion_provider
 
 __all__ = [
+    "AIDirectorResult",
     "BUILTIN_PRESETS",
     "CloudAIConfig",
     "MotionProvider",
     "OpticalColorConfig",
     "PipelineConfig",
     "PipelineResult",
+    "SUGGESTED_MODELS",
     "Stage1FocusConfig",
     "Stage2MotionConfig",
     "Stage3OpticsConfig",
     "Stage4GrainConfig",
     "Stage5CompressionConfig",
     "UserBrushMask",
+    "VisionDirectorConfig",
+    "apply_director_guidance_to_config",
     "decode_rgba_brush_mask",
+    "direct_photo_with_ai",
     "get_builtin_preset",
+    "list_available_vision_models",
     "list_builtin_presets",
     "list_custom_presets",
     "load_preset_json",

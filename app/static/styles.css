@@ -273,6 +273,40 @@ body {
   font-size: 11px;
 }
 
+.btn-ai {
+  background: linear-gradient(135deg, #7c5cff 0%, #c84bff 100%);
+  color: #fff;
+  box-shadow: 0 2px 10px rgba(145, 84, 255, 0.35);
+}
+
+.btn-ai:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.active-ghost {
+  color: #d6cffc;
+  border-color: rgba(124, 92, 255, 0.55);
+  background: rgba(124, 92, 255, 0.14);
+}
+
+.ai-tune-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 0 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.toolbar-sep {
+  width: 1px;
+  height: 16px;
+  background: var(--border-strong);
+  margin: 0 2px;
+}
+
 .btn-full {
   width: 100%;
 }
@@ -534,12 +568,18 @@ body {
   width: 100%;
   height: 100%;
   pointer-events: none;
-  opacity: 0.5;
+  opacity: 0.46;
+  transition: opacity 0.15s ease;
+}
+
+.brush-canvas.mask-hidden {
+  opacity: 0 !important;
 }
 
 .brush-canvas.painting {
   pointer-events: auto;
   cursor: crosshair;
+  opacity: 0.52 !important;
 }
 
 /* Wipe Slider View */
@@ -1130,6 +1170,42 @@ select:focus, input[type="text"]:focus, input[type="password"]:focus {
   border: 1px solid var(--border-strong);
   border-radius: 12px;
   overflow: hidden;
+}
+
+.modal-card.modal-wide {
+  max-width: 500px;
+}
+
+.settings-section-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #e4dcff;
+}
+
+.field-row-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.optional-details {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+  margin-top: 2px;
+}
+
+.optional-details summary {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.optional-details-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
 }
 
 .modal-head {

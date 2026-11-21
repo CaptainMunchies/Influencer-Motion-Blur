@@ -29,6 +29,11 @@ from pydantic import BaseModel, Field
 from engine import (
     CloudAIConfig,
     PipelineConfig,
+    SUGGESTED_MODELS,
+    VisionDirectorConfig,
+    apply_director_guidance_to_config,
+    direct_photo_with_ai,
+    list_available_vision_models,
     list_builtin_presets,
     list_custom_presets,
     run_pipeline,
@@ -112,37 +117,79 @@ def _decode_brush_data_url(data_url: Optional[str]) -> Optional[np.ndarray]:
         return None
 
 
-def _load_cloud_settings() -> CloudAIConfig:
+def _load_raw_settings() -> Dict[str, Any]:
     if not SETTINGS_PATH.exists():
-        return CloudAIConfig()
+        return {}
     try:
         with SETTINGS_PATH.open("r", encoding="utf-8") as f:
             data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _load_cloud_settings() -> CloudAIConfig:
+    data = _load_raw_settings()
+    sub = data.get("cloud_motion") if isinstance(data.get("cloud_motion"), dict) else data
+    try:
         return CloudAIConfig(
-            provider=data.get("provider", "fal"),
-            api_key=data.get("api_key", ""),
-            model=data.get("model", ""),
-            prompt=data.get("prompt", CloudAIConfig.prompt),
-            strength=float(data.get("strength", 0.35)),
+            provider=sub.get("provider", "fal"),
+            api_key=sub.get("api_key", ""),
+            model=sub.get("model", ""),
+            prompt=sub.get("prompt", CloudAIConfig.prompt),
+            strength=float(sub.get("strength", 0.35)),
         ).validated()
     except Exception:
         return CloudAIConfig()
 
 
-def _save_cloud_settings(cfg: CloudAIConfig) -> None:
-    clean = cfg.validated()
+def _load_vision_settings() -> VisionDirectorConfig:
+    data = _load_raw_settings()
+    sub = data.get("vision_director") if isinstance(data.get("vision_director"), dict) else {}
+    try:
+        return VisionDirectorConfig(
+            provider=sub.get("provider", "gemini"),
+            api_key=sub.get("api_key", ""),
+            model=sub.get("model", ""),
+        ).validated()
+    except Exception:
+        return VisionDirectorConfig()
+
+
+def _save_all_settings(vision: VisionDirectorConfig, cloud: CloudAIConfig) -> None:
+    v = vision.validated()
+    c = cloud.validated()
     with SETTINGS_PATH.open("w", encoding="utf-8") as f:
         json.dump(
             {
-                "provider": clean.provider,
-                "api_key": clean.api_key,
-                "model": clean.model,
-                "prompt": clean.prompt,
-                "strength": clean.strength,
+                "vision_director": {
+                    "provider": v.provider,
+                    "api_key": v.api_key,
+                    "model": v.model,
+                },
+                "cloud_motion": {
+                    "provider": c.provider,
+                    "api_key": c.api_key,
+                    "model": c.model,
+                    "prompt": c.prompt,
+                    "strength": c.strength,
+                },
             },
             f,
             indent=2,
         )
+
+
+def _mask_preview(key: str) -> str:
+    if not key:
+        return ""
+    return (key[:4] + "••••" + key[-3:]) if len(key) > 8 else "••••"
+
+
+def _encode_rgba_png_data_url(rgba: np.ndarray) -> str:
+    buf = io.BytesIO()
+    Image.fromarray(rgba, mode="RGBA").save(buf, format="PNG", compress_level=4)
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
 
 
 # ---------- Pydantic request schemas ----------
@@ -171,12 +218,29 @@ class SavePresetRequest(BaseModel):
     config: Dict[str, Any]
 
 
-class CloudSettingsRequest(BaseModel):
+class SettingsUpdateRequest(BaseModel):
+    # Vision AI Art Director (masks, face center, arm pivots — never regenerates pixels)
+    vision_provider: str = "gemini"
+    vision_api_key: str = "__KEEP__"
+    vision_model: str = "gemini-4-hydrogen"
+    # Optional Cloud AI Motion (legacy/optional fal.ai or Replicate)
     provider: str = "fal"
-    api_key: str = ""
+    api_key: str = "__KEEP__"
     model: str = ""
     prompt: str = "subtle authentic handheld iPhone night camera motion blur, natural skin"
     strength: float = 0.35
+
+
+class AIDirectRequest(BaseModel):
+    image_id: str
+    config: Dict[str, Any]
+    apply_sliders: bool = False
+    user_goal: str = ""
+
+
+class AIModelsRequest(BaseModel):
+    provider: str = "gemini"
+    api_key: str = "__KEEP__"
 
 
 # ---------- API Routes ----------
@@ -224,31 +288,112 @@ def delete_preset(preset_id: str) -> Dict[str, Any]:
 
 @app.get("/api/settings")
 def get_settings() -> Dict[str, Any]:
-    cfg = _load_cloud_settings()
+    v = _load_vision_settings()
+    c = _load_cloud_settings()
     return {
-        "provider": cfg.provider,
-        "has_api_key": bool(cfg.api_key),
-        "api_key_preview": (cfg.api_key[:4] + "••••" + cfg.api_key[-3:]) if len(cfg.api_key) > 8 else ("••••" if cfg.api_key else ""),
-        "model": cfg.model,
-        "prompt": cfg.prompt,
-        "strength": cfg.strength,
+        "vision_provider": v.provider,
+        "vision_has_api_key": bool(v.api_key),
+        "vision_api_key_preview": _mask_preview(v.api_key),
+        "vision_model": v.model,
+        "suggested_models": SUGGESTED_MODELS,
+        "provider": c.provider,
+        "has_api_key": bool(c.api_key),
+        "api_key_preview": _mask_preview(c.api_key),
+        "model": c.model,
+        "prompt": c.prompt,
+        "strength": c.strength,
     }
 
 
 @app.post("/api/settings")
-def update_settings(req: CloudSettingsRequest) -> Dict[str, Any]:
-    existing = _load_cloud_settings()
-    # Keep existing API key if user left placeholder unchanged
-    new_key = existing.api_key if req.api_key == "__KEEP__" else req.api_key.strip()
-    cfg = CloudAIConfig(
+def update_settings(req: SettingsUpdateRequest) -> Dict[str, Any]:
+    existing_v = _load_vision_settings()
+    existing_c = _load_cloud_settings()
+    new_v_key = existing_v.api_key if req.vision_api_key == "__KEEP__" else req.vision_api_key.strip()
+    new_c_key = existing_c.api_key if req.api_key == "__KEEP__" else req.api_key.strip()
+
+    v_cfg = VisionDirectorConfig(
+        provider=req.vision_provider,  # type: ignore[arg-type]
+        api_key=new_v_key,
+        model=req.vision_model,
+    ).validated()
+    c_cfg = CloudAIConfig(
         provider=req.provider,  # type: ignore[arg-type]
-        api_key=new_key,
+        api_key=new_c_key,
         model=req.model,
         prompt=req.prompt,
         strength=req.strength,
     ).validated()
-    _save_cloud_settings(cfg)
+    _save_all_settings(v_cfg, c_cfg)
     return get_settings()
+
+
+@app.post("/api/ai-models")
+def fetch_ai_models(req: AIModelsRequest) -> Dict[str, Any]:
+    existing_v = _load_vision_settings()
+    key = existing_v.api_key if req.api_key == "__KEEP__" else req.api_key.strip()
+    models = list_available_vision_models(req.provider, key)
+    return {"provider": req.provider, "models": models}
+
+
+@app.post("/api/ai-direct")
+def ai_direct_photo(req: AIDirectRequest) -> Dict[str, Any]:
+    photo = PHOTOS.get(req.image_id)
+    if photo is None:
+        raise HTTPException(status_code=404, detail="Photo session expired. Please upload your photo again.")
+
+    v_cfg = _load_vision_settings()
+    if not v_cfg.api_key:
+        raise HTTPException(
+            status_code=400,
+            detail="Add your Gemini, OpenAI, or OpenRouter API key in Settings (⚙) first to use AI Auto-Paint.",
+        )
+
+    try:
+        director_res = direct_photo_with_ai(
+            rgb_u8=photo.preview_rgb,
+            director_cfg=v_cfg,
+            user_goal=req.user_goal,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    base_cfg = PipelineConfig.from_dict(req.config)
+    updated_cfg = apply_director_guidance_to_config(
+        base_cfg,
+        director_res,
+        apply_slider_recommendations=req.apply_sliders,
+    )
+
+    cloud_cfg = _load_cloud_settings()
+    pipe_res = run_pipeline(
+        image=photo.preview_rgb,
+        config=updated_cfg,
+        brush_rgba=director_res.brush_rgba,
+        cloud_config=cloud_cfg,
+        return_intermediates=True,
+    )
+
+    stage_urls = {
+        key: _store_render(img, quality=94 if key != "stage5" else 96)
+        for key, img in pipe_res.stages.items()
+    }
+    return {
+        "image_id": req.image_id,
+        "scene_summary": director_res.scene_summary,
+        "model_used": director_res.model_used,
+        "provider_used": director_res.provider_used,
+        "focus_center": list(director_res.focus_center),
+        "pivots_count": len(director_res.pivots),
+        "sharp_regions": len(director_res.keep_sharp_polygons),
+        "blur_regions": len(director_res.blur_polygons),
+        "brush_data_url": _encode_rgba_png_data_url(director_res.brush_rgba),
+        "config": updated_cfg.to_dict(),
+        "stages": stage_urls,
+        "timings_ms": pipe_res.timings_ms,
+        "total_ms": pipe_res.total_ms,
+        "notes": pipe_res.notes,
+    }
 
 
 @app.post("/api/upload")

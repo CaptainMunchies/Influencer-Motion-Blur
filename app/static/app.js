@@ -26,10 +26,13 @@ const state = {
   allExpanded: false,
   brushMode: "off", // "off" | "sharp" | "blur"
   brushHasStrokes: false,
+  showMaskOverlay: true,
   isPainting: false,
   isProcessing: false,
   debounceTimer: null,
   showdownResults: null,
+  suggestedModels: {},
+  visionHasKey: false,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -597,6 +600,101 @@ function mirrorBrushCanvas() {
   ctx.drawImage(src, 0, 0);
 }
 
+function setMaskVisibility(show) {
+  state.showMaskOverlay = show;
+  $("brushCanvas").classList.toggle("mask-hidden", !show);
+  $("brushMirrorCanvas").classList.toggle("mask-hidden", !show);
+  $("toggleMaskBtn").classList.toggle("active-ghost", show);
+}
+
+async function paintBrushFromDataUrl(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const c1 = $("brushCanvas");
+      const ctx = c1.getContext("2d");
+      ctx.clearRect(0, 0, c1.width, c1.height);
+      ctx.drawImage(img, 0, 0, c1.width, c1.height);
+      state.brushHasStrokes = true;
+      mirrorBrushCanvas();
+      resolve();
+    };
+    img.onerror = reject;
+    img.src = dataUrl;
+  });
+}
+
+async function runAIAutoPaint() {
+  if (!state.imageId || !state.config) {
+    showToast("Upload a photo first.");
+    return;
+  }
+
+  // If no Vision AI key saved yet, open Settings straight to the key box!
+  const sResp = await fetch("/api/settings");
+  const sData = await sResp.json();
+  if (!sData.vision_has_api_key) {
+    showToast("Paste your Gemini, OpenAI, or OpenRouter API key first.");
+    await openSettingsModal();
+    $("visionKeyInput").focus();
+    return;
+  }
+
+  const btn = $("aiAutoPaintBtn");
+  const prevText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "✨ AI Looking…";
+  $("loadingOverlay").classList.remove("hidden");
+  setStatus("AI directing…");
+
+  try {
+    readControlsIntoConfig();
+    const applySliders = $("aiTuneSlidersCheck").checked;
+    const resp = await fetch("/api/ai-direct", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        image_id: state.imageId,
+        config: state.config,
+        apply_sliders: applySliders,
+      }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      throw new Error(data.detail || "AI Auto-Paint failed");
+    }
+
+    // Paint the AI's green/red regions straight onto the interactive Focus Brush canvas!
+    if (data.brush_data_url) {
+      await paintBrushFromDataUrl(data.brush_data_url);
+      setMaskVisibility(true);
+    }
+
+    // Apply returned config (focus center, real shoulder/elbow pivots, and optional sliders)
+    state.config = data.config;
+    syncControlsFromConfig();
+    state.stages = data.stages;
+    renderFilmstrip();
+    updateViewerImages();
+    requestAnimationFrame(() => fitStageImages());
+
+    const sec = (data.total_ms / 1000).toFixed(2);
+    setStatus(`AI ready (${sec}s)`);
+
+    const noteBanner = $("noteBanner");
+    noteBanner.textContent = `✨ ${data.model_used}: ${data.scene_summary} (${data.sharp_regions} sharp, ${data.blur_regions} blur, ${data.pivots_count} arm pivots — click "Mask" to hide/show overlay)`;
+    noteBanner.classList.remove("hidden");
+    showToast("AI painted face & moving limbs!");
+  } catch (err) {
+    setStatus("AI error");
+    showToast(err.message, 4200);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = prevText;
+    $("loadingOverlay").classList.add("hidden");
+  }
+}
+
 function setBrushMode(mode) {
   state.brushMode = mode;
   document.querySelectorAll(".brush-btn").forEach((b) => {
@@ -859,23 +957,82 @@ async function downloadFinalResult() {
 }
 
 // ---------- Modals ----------
+function populateVisionModelsDropdown(models, selectedId) {
+  const sel = $("visionModelSelect");
+  sel.innerHTML = "";
+  let found = false;
+  for (const m of models || []) {
+    const opt = document.createElement("option");
+    opt.value = m.id;
+    opt.textContent = m.label || m.id;
+    if (m.id === selectedId) found = true;
+    sel.appendChild(opt);
+  }
+  if (found) {
+    sel.value = selectedId;
+    $("visionCustomModelInput").value = "";
+  } else if (selectedId) {
+    $("visionCustomModelInput").value = selectedId;
+  }
+}
+
 async function openSettingsModal() {
   const resp = await fetch("/api/settings");
   const data = await resp.json();
+  state.suggestedModels = data.suggested_models || {};
+  state.visionHasKey = Boolean(data.vision_has_api_key);
+
+  const vProv = data.vision_provider || "gemini";
+  $("visionProviderSelect").value = vProv;
+  $("visionKeyInput").value = data.vision_has_api_key ? "__KEEP__" : "";
+  $("visionKeyStatus").textContent = data.vision_has_api_key
+    ? `Saved key: ${data.vision_api_key_preview} (clear box to remove)`
+    : "Paste a Gemini, OpenAI, or OpenRouter key to enable ✨ AI Auto-Paint.";
+  populateVisionModelsDropdown(state.suggestedModels[vProv] || [], data.vision_model);
+
   $("cloudProviderSelect").value = data.provider || "fal";
   $("cloudKeyInput").value = data.has_api_key ? "__KEEP__" : "";
   $("cloudKeyStatus").textContent = data.has_api_key
-    ? `Saved key: ${data.api_key_preview} (clear field to remove)`
-    : "No API key set — running 100% locally on your PC.";
+    ? `Saved key: ${data.api_key_preview} (clear box to remove)`
+    : "No Cloud Motion key set — running 100% locally on your PC.";
   $("cloudModelInput").value = data.model || "";
   $("settingsModal").classList.remove("hidden");
 }
 
+async function fetchLiveVisionModels() {
+  const btn = $("fetchModelsBtn");
+  const prev = btn.textContent;
+  btn.textContent = "Loading…";
+  try {
+    const provider = $("visionProviderSelect").value;
+    const keyVal = $("visionKeyInput").value;
+    const resp = await fetch("/api/ai-models", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider, api_key: keyVal }),
+    });
+    const data = await resp.json();
+    const cur = $("visionCustomModelInput").value.trim() || $("visionModelSelect").value;
+    populateVisionModelsDropdown(data.models || [], cur);
+    showToast(`Loaded ${(data.models || []).length} models for ${provider}`);
+  } catch (err) {
+    showToast("Could not fetch live models — check your API key.");
+  } finally {
+    btn.textContent = prev;
+  }
+}
+
 async function saveSettings() {
+  const customModel = $("visionCustomModelInput").value.trim();
+  const chosenModel = customModel || $("visionModelSelect").value;
+
   const resp = await fetch("/api/settings", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
+      vision_provider: $("visionProviderSelect").value,
+      vision_api_key: $("visionKeyInput").value,
+      vision_model: chosenModel,
       provider: $("cloudProviderSelect").value,
       api_key: $("cloudKeyInput").value,
       model: $("cloudModelInput").value,
@@ -883,7 +1040,7 @@ async function saveSettings() {
   });
   if (resp.ok) {
     $("settingsModal").classList.add("hidden");
-    showToast("Settings saved!");
+    showToast("AI Settings saved!");
   }
 }
 
@@ -960,12 +1117,23 @@ function bindEvents() {
   document.querySelectorAll(".brush-btn").forEach((btn) => {
     btn.addEventListener("click", () => setBrushMode(btn.dataset.brush));
   });
+  $("aiAutoPaintBtn").addEventListener("click", runAIAutoPaint);
+  $("toggleMaskBtn").addEventListener("click", () => setMaskVisibility(!state.showMaskOverlay));
   $("clearBrushBtn").addEventListener("click", () => {
     if (!state.previewWidth) return;
     initBrushCanvases(state.previewWidth, state.previewHeight);
+    if (state.config && state.config.stage2_motion) {
+      state.config.stage2_motion.ai_pivots = [];
+    }
     showToast("Cleared painted brush");
     if (state.imageId) processCurrentPhoto();
   });
+
+  $("visionProviderSelect").addEventListener("change", () => {
+    const prov = $("visionProviderSelect").value;
+    populateVisionModelsDropdown(state.suggestedModels[prov] || [], "");
+  });
+  $("fetchModelsBtn").addEventListener("click", fetchLiveVisionModels);
 
   const controlIds = [
     "s1_enabled", "s1_radius", "s1_falloff_mode", "s1_falloff_strength",

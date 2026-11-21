@@ -14,8 +14,10 @@ from PIL import Image
 
 from app.server import app
 from engine import (
+    AIDirectorResult,
     CloudAIConfig,
     PipelineConfig,
+    apply_director_guidance_to_config,
     get_builtin_preset,
     list_builtin_presets,
     load_preset_json,
@@ -23,6 +25,7 @@ from engine import (
     run_pipeline,
     save_preset_json,
 )
+from engine.ai_director import rasterize_guidance_to_brush_rgba
 
 
 def _make_synthetic_portrait(w: int = 960, h: int = 1200) -> np.ndarray:
@@ -188,12 +191,52 @@ def test_cpu_speed_1080x1350() -> None:
         assert elapsed_s < 4.5, f"Too slow on CPU: {elapsed_s:.2f}s"
 
 
+def test_ai_director_rasterize_and_pivots() -> None:
+    img = _make_synthetic_portrait(600, 750)
+    h, w = img.shape[:2]
+    sharp_polys = [
+        {"label": "face", "points": [[0.40, 0.20], [0.60, 0.20], [0.60, 0.40], [0.40, 0.40]]}
+    ]
+    blur_polys = [
+        {
+            "label": "left_arm",
+            "points": [[0.10, 0.35], [0.28, 0.35], [0.28, 0.65], [0.10, 0.65]],
+            "pivot": [0.30, 0.40],
+            "swing_angle_deg": 9.0,
+        }
+    ]
+    rgba = rasterize_guidance_to_brush_rgba((h, w), sharp_polys, blur_polys)
+    assert rgba.shape == (h, w, 4)
+    # Face center should be painted green, arm center red
+    assert rgba[int(h * 0.30), int(w * 0.50), 1] > 200
+    assert rgba[int(h * 0.50), int(w * 0.18), 0] > 200
+
+    res_dir = AIDirectorResult(
+        scene_summary="Kept face sharp, blurred left arm.",
+        focus_center=(0.50, 0.30),
+        keep_sharp_polygons=sharp_polys,
+        blur_polygons=blur_polys,
+        pivots=[{"x": 0.30, "y": 0.40, "angle_deg": 9.0, "polygon": blur_polys[0]["points"]}],
+        recommended_settings={"motion_method": "pivot_swing", "shake_amount": 11.0},
+        brush_rgba=rgba,
+        model_used="gemini-4-hydrogen",
+        provider_used="gemini",
+    )
+    cfg = apply_director_guidance_to_config(get_builtin_preset("flash_party_blur"), res_dir, apply_slider_recommendations=True)
+    assert cfg.stage2_motion.method == "pivot_swing"
+    assert len(cfg.stage2_motion.ai_pivots) == 1
+    pipe = run_pipeline(img, cfg, brush_rgba=rgba)
+    assert pipe.motion_provider == "pivot_swing:ai_pivots"
+    print(f"  [OK] AI Art Director polygon rasterize + exact arm-pivot swing verified ({pipe.total_ms:.0f} ms)")
+
+
 if __name__ == "__main__":
     print("Running Influencer Blur Lab test suite...")
     test_presets_and_determinism()
     test_independent_stage_toggles()
     test_motion_methods_and_cloud_fallback()
     test_brush_mask_and_preset_json()
+    test_ai_director_rasterize_and_pivots()
     test_fastapi_endpoints()
     test_cpu_speed_1080x1350()
     print("\nALL TESTS PASSED!")

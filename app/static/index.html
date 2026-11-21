@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Influencer Blur Lab</title>
-  <link rel="stylesheet" href="/static/styles.css?v=2" />
+  <link rel="stylesheet" href="/static/styles.css?v=3" />
 </head>
 <body>
   <!-- Single Compact Studio Header (merges brand, tabs, presets & actions to maximize photo space) -->
@@ -76,11 +76,19 @@
         </div>
 
         <div class="toolbar-group brush-group">
-          <span class="toolbar-label">Brush:</span>
+          <button id="aiAutoPaintBtn" class="btn btn-ai btn-xxs" title="Let your connected Vision AI detect the face & moving arms and paint the mask automatically (zero pixel regeneration)">
+            ✨ AI Auto-Paint
+          </button>
+          <label class="ai-tune-check" title="Also let the AI suggest slider levels & blur style for this photo">
+            <input id="aiTuneSlidersCheck" type="checkbox" />
+            <span>+ Sliders</span>
+          </label>
+          <span class="toolbar-sep"></span>
           <button class="brush-btn active" data-brush="off">Off</button>
           <button class="brush-btn brush-sharp" data-brush="sharp" title="Paint green over faces to keep them sharp">Keep Sharp</button>
           <button class="brush-btn brush-blur" data-brush="blur" title="Paint red over hands or arms to blur them">Make Blurry</button>
           <input id="brushSizeInput" class="brush-size-slider" type="range" min="18" max="120" value="54" title="Brush size" />
+          <button id="toggleMaskBtn" class="btn btn-ghost btn-xxs active-ghost" title="Show or hide green/red painted mask overlay">Mask</button>
           <button id="clearBrushBtn" class="btn btn-ghost btn-xxs" title="Clear painted areas">Clear</button>
         </div>
       </div>
@@ -439,34 +447,70 @@
     </div>
   </div>
 
-  <!-- Optional Cloud AI Settings Drawer -->
+  <!-- AI Director & Optional Cloud Settings Drawer -->
   <div id="settingsModal" class="modal hidden">
-    <div class="modal-card">
+    <div class="modal-card modal-wide">
       <div class="modal-head">
-        <h3>Optional Cloud AI Settings</h3>
+        <h3>AI Director &amp; API Settings</h3>
         <button class="modal-close" data-close-modal="settingsModal">✕</button>
       </div>
       <div class="modal-body">
+        <div class="settings-section-title">✨ AI Auto-Paint (Vision Director)</div>
         <p class="settings-reassure">
-          Totally optional! Influencer Blur Lab runs fast right on your PC with zero API keys.
-          Add a fal.ai or Replicate key here only if you want to compare a Cloud AI blur option later.
+          Never regenerates or changes a single pixel of the photo — the AI only looks at the photo,
+          paints the green/red Focus Brush around the real face &amp; moving arms, and sets exact swing pivots.
         </p>
-        <div class="field">
-          <label class="field-label" for="cloudProviderSelect">Cloud Service</label>
-          <select id="cloudProviderSelect">
-            <option value="fal">fal.ai</option>
-            <option value="replicate">Replicate</option>
-          </select>
+
+        <div class="field-row-2">
+          <div class="field">
+            <label class="field-label" for="visionProviderSelect">AI Provider</label>
+            <select id="visionProviderSelect">
+              <option value="gemini">Google Gemini (Recommended)</option>
+              <option value="openai">OpenAI</option>
+              <option value="openrouter">OpenRouter (Any Model)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="field-label" for="visionKeyInput">API Key</label>
+            <input id="visionKeyInput" type="password" placeholder="Paste your API key" />
+          </div>
         </div>
+        <div id="visionKeyStatus" class="field-hint"></div>
+
         <div class="field">
-          <label class="field-label" for="cloudKeyInput">API Key</label>
-          <input id="cloudKeyInput" type="password" placeholder="Leave blank to stay 100% local" />
-          <div id="cloudKeyStatus" class="field-hint"></div>
+          <div class="field-label">
+            <label for="visionModelSelect">Vision Model</label>
+            <button id="fetchModelsBtn" class="btn-link" type="button">↻ Fetch Live Models</button>
+          </div>
+          <select id="visionModelSelect"></select>
         </div>
+
         <div class="field">
-          <label class="field-label" for="cloudModelInput">Model Name (optional)</label>
-          <input id="cloudModelInput" type="text" placeholder="Default model used if blank" />
+          <label class="field-label" for="visionCustomModelInput">Or Type Any Exact Model ID (optional)</label>
+          <input id="visionCustomModelInput" type="text" placeholder="Leave blank to use dropdown above (e.g. gemini-4-neon)" />
         </div>
+
+        <details class="optional-details">
+          <summary>Optional: Cloud Motion Provider (fal.ai / Replicate)</summary>
+          <div class="optional-details-body">
+            <div class="field">
+              <label class="field-label" for="cloudProviderSelect">Cloud Service</label>
+              <select id="cloudProviderSelect">
+                <option value="fal">fal.ai</option>
+                <option value="replicate">Replicate</option>
+              </select>
+            </div>
+            <div class="field">
+              <label class="field-label" for="cloudKeyInput">API Key</label>
+              <input id="cloudKeyInput" type="password" placeholder="Leave blank to stay 100% local" />
+              <div id="cloudKeyStatus" class="field-hint"></div>
+            </div>
+            <div class="field">
+              <label class="field-label" for="cloudModelInput">Model Name (optional)</label>
+              <input id="cloudModelInput" type="text" placeholder="Default model used if blank" />
+            </div>
+          </div>
+        </details>
       </div>
       <div class="modal-foot">
         <button class="btn btn-ghost btn-sm" data-close-modal="settingsModal">Close</button>
@@ -478,6 +522,6 @@
   <!-- Toast Notification -->
   <div id="toast" class="toast hidden"></div>
 
-  <script src="/static/app.js?v=2"></script>
+  <script src="/static/app.js?v=3"></script>
 </body>
 </html>

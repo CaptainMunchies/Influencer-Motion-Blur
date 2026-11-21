@@ -345,6 +345,48 @@ class LocalPivotSwingProvider(MotionProvider):
             return MotionResult(linear_rgb=linear_rgb.copy(), provider_used=self.name)
 
         h, w = linear_rgb.shape[:2]
+
+        # Priority 1: Exact AI-detected shoulder/elbow pivot points + per-limb polygons!
+        if cfg.ai_pivots:
+            out = linear_rgb.copy()
+            sigma = max(4.0, min(h, w) * 0.025)
+            ksize = max(5, min(int(sigma * 4) | 1, 151))
+            for piv in cfg.ai_pivots:
+                px = float(piv["x"]) * (w - 1)
+                py = float(piv["y"]) * (h - 1)
+                ang = float(piv.get("angle_deg", cfg.swing_angle))
+                # Scale AI angle proportionally to user's Arm Swing Arc slider
+                scale_ang = (cfg.swing_angle / 8.0)
+                arc_img = self._rotational_arc_blur(
+                    linear_rgb,
+                    pivot_xy=(px, py),
+                    max_angle_deg=ang * scale_ang,
+                    steps=15,
+                    ghost_strength=cfg.ghost_strength,
+                )
+                poly_pts = piv.get("polygon")
+                if poly_pts and len(poly_pts) >= 3:
+                    limb_mask = np.zeros((h, w), dtype=np.float32)
+                    poly = np.array(
+                        [[int(round(pt[0] * (w - 1))), int(round(pt[1] * (h - 1)))] for pt in poly_pts],
+                        dtype=np.int32,
+                    )
+                    cv2.fillPoly(limb_mask, [poly], 1.0)
+                    limb_mask = cv2.GaussianBlur(limb_mask, (ksize, ksize), sigma)
+                    limb_mask = np.clip(limb_mask * 1.15, 0.0, 1.0)
+                elif brush is not None and brush.has_blur:
+                    limb_mask = brush.extra_blur.copy()
+                else:
+                    limb_mask = build_outer_limb_mask((h, w), brush=brush)
+
+                if brush is not None and brush.has_sharp:
+                    limb_mask = limb_mask * (1.0 - brush.keep_sharp)
+
+                wm = (limb_mask * cfg.swing_intensity)[..., np.newaxis]
+                out = out * (1.0 - wm) + arc_img * wm
+
+            return MotionResult(linear_rgb=np.maximum(out, 0.0).astype(np.float32), provider_used=f"{self.name}:ai_pivots")
+
         # Left & right shoulder/elbow pivot points for natural outward arm-swing arcs
         left_pivot = (w * 0.36, h * 0.44)
         right_pivot = (w * 0.64, h * 0.44)

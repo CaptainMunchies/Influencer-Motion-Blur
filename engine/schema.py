@@ -7,11 +7,12 @@ engine can be embedded directly in a SaaS API or driven by the local QA web UI.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 FocusFalloffMode = Literal["uniform", "face_center", "edges"]
 MotionMethod = Literal["handheld_shake", "flash_drag", "pivot_swing", "cloud_ai"]
 CloudProviderName = Literal["fal", "replicate"]
+VisionProviderName = Literal["gemini", "openai", "openrouter"]
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:
@@ -81,6 +82,29 @@ class CloudAIConfig:
 
 
 @dataclass
+class VisionDirectorConfig:
+    """Settings for the AI Art Director (guides masks, focus center & pivots; never regenerates pixels)."""
+
+    provider: VisionProviderName = "gemini"
+    api_key: str = ""
+    model: str = "gemini-4-hydrogen"
+
+    def validated(self) -> "VisionDirectorConfig":
+        provider = self.provider if self.provider in ("gemini", "openai", "openrouter") else "gemini"
+        default_models = {
+            "gemini": "gemini-4-hydrogen",
+            "openai": "gpt-6.2-sol",
+            "openrouter": "google/gemini-4-hydrogen",
+        }
+        model = str(self.model or "").strip() or default_models[provider]
+        return VisionDirectorConfig(
+            provider=provider,
+            api_key=str(self.api_key or "").strip(),
+            model=model,
+        )
+
+
+@dataclass
 class Stage2MotionConfig:
     """Stage 2: Realistic curved motion blur, slow-sync flash drag, or arm-swing arc."""
 
@@ -97,6 +121,8 @@ class Stage2MotionConfig:
     # Pivot / Arm Swing specifics
     swing_angle: float = 7.5  # Rotational arc angle in degrees for moving arms/hands
     swing_intensity: float = 0.80  # Blend weight on moving limb zones
+    # Optional AI-detected shoulder/elbow pivot points: [{"x": 0..1, "y": 0..1, "angle_deg": float, "polygon": [[x,y],...]}]
+    ai_pivots: List[Dict[str, Any]] = field(default_factory=list)
     # Deterministic seed for reproducible hand-shake curves
     seed: int = 42
 
@@ -106,6 +132,22 @@ class Stage2MotionConfig:
             if self.method in ("handheld_shake", "flash_drag", "pivot_swing", "cloud_ai")
             else "handheld_shake"
         )
+        clean_pivots: List[Dict[str, Any]] = []
+        if isinstance(self.ai_pivots, list):
+            for p in self.ai_pivots[:6]:
+                if isinstance(p, dict) and "x" in p and "y" in p:
+                    item: Dict[str, Any] = {
+                        "x": _clamp(float(p["x"]), 0.0, 1.0),
+                        "y": _clamp(float(p["y"]), 0.0, 1.0),
+                        "angle_deg": _clamp(float(p.get("angle_deg", self.swing_angle)), -24.0, 24.0),
+                    }
+                    if isinstance(p.get("polygon"), list) and len(p["polygon"]) >= 3:
+                        item["polygon"] = [
+                            [_clamp(float(pt[0]), 0.0, 1.0), _clamp(float(pt[1]), 0.0, 1.0)]
+                            for pt in p["polygon"]
+                            if isinstance(pt, (list, tuple)) and len(pt) >= 2
+                        ]
+                    clean_pivots.append(item)
         return Stage2MotionConfig(
             enabled=bool(self.enabled),
             method=method,
@@ -118,6 +160,7 @@ class Stage2MotionConfig:
             ambient_warmth=_clamp(self.ambient_warmth, 0.0, 0.5),
             swing_angle=_clamp(self.swing_angle, 1.0, 22.0),
             swing_intensity=_clamp(self.swing_intensity, 0.0, 1.0),
+            ai_pivots=clean_pivots,
             seed=int(self.seed),
         )
 
