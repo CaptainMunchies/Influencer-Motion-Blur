@@ -324,6 +324,109 @@ BUILTIN_PRESETS: Dict[str, PipelineConfig] = {
             jpeg_quality=83,
         ),
     ),
+    "3am_night_zoom": PipelineConfig(
+        name="3AM Night Zoom",
+        description=(
+            "Raw pinch-zoomed iPhone night snap (like shooting from across the stairs at 3AM): "
+            "digital-zoom sensor softness, waxy low-light phone smoothing, coarse night grain, "
+            "warm olive-charcoal shadows, and gritty IG compression."
+        ),
+        color=OpticalColorConfig(gamma=2.2, highlight_threshold=0.84, highlight_boost=0.65),
+        stage1_focus=Stage1FocusConfig(
+            enabled=True,
+            radius=2.1,
+            falloff_mode="face_center",
+            falloff_strength=0.32,
+            focus_center_x=0.50,
+            focus_center_y=0.30,
+            aperture_rim_softness=0.22,
+        ),
+        stage2_motion=Stage2MotionConfig(
+            enabled=True,
+            method="handheld_shake",
+            shake_amount=5.5,
+            ghost_strength=0.30,
+            curvature=0.62,
+            direction_angle=22.0,
+            flash_sharpness=0.72,
+            outer_smear=0.40,
+            ambient_warmth=0.16,
+            seed=707,
+        ),
+        stage3_optics=Stage3OpticsConfig(
+            enabled=True,
+            glow_amount=0.26,
+            haze_lift=0.22,
+            warmth=0.28,
+            edge_fringing=0.22,
+        ),
+        stage4_grain=Stage4GrainConfig(
+            enabled=True,
+            grain_amount=0.52,
+            clumpiness=0.78,
+            isp_smoothing=0.84,
+            shadow_weight=0.74,
+            digital_zoom=0.72,
+            night_cast=0.38,
+            seed=713,
+        ),
+        stage5_compression=Stage5CompressionConfig(
+            enabled=True,
+            insta_softness=0.22,
+            jpeg_quality=75,
+        ),
+    ),
+    "lofi_streetlight_blur": PipelineConfig(
+        name="Lo-Fi Streetlight",
+        description=(
+            "Moody dim 3AM streetlamp candid: whole-frame missed focus & slow-shutter dim blur, "
+            "muted streetlight exposure, olive-amber shadows, and soft ISO-6400 night texture."
+        ),
+        color=OpticalColorConfig(gamma=2.2, highlight_threshold=0.84, highlight_boost=0.52),
+        stage1_focus=Stage1FocusConfig(
+            enabled=True,
+            radius=4.8,
+            falloff_mode="uniform",
+            falloff_strength=0.0,
+            focus_center_x=0.50,
+            focus_center_y=0.34,
+            aperture_rim_softness=0.25,
+        ),
+        stage2_motion=Stage2MotionConfig(
+            enabled=True,
+            method="handheld_shake",
+            shake_amount=9.0,
+            ghost_strength=0.24,
+            curvature=0.64,
+            direction_angle=-18.0,
+            flash_sharpness=0.68,
+            outer_smear=0.35,
+            ambient_warmth=0.22,
+            seed=808,
+        ),
+        stage3_optics=Stage3OpticsConfig(
+            enabled=True,
+            glow_amount=0.22,
+            haze_lift=0.14,
+            warmth=0.36,
+            edge_fringing=0.18,
+        ),
+        stage4_grain=Stage4GrainConfig(
+            enabled=True,
+            grain_amount=0.58,
+            clumpiness=0.84,
+            isp_smoothing=0.72,
+            shadow_weight=0.78,
+            digital_zoom=0.62,
+            night_cast=0.76,
+            seed=819,
+        ),
+        stage5_compression=Stage5CompressionConfig(
+            enabled=True,
+            insta_softness=0.28,
+            jpeg_quality=76,
+        ),
+    ),
 }
 
 

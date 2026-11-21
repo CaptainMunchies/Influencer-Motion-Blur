@@ -188,13 +188,15 @@ class Stage3OpticsConfig:
 
 @dataclass
 class Stage4GrainConfig:
-    """Stage 4: Nighttime smartphone high-ISO grain & clumpy ISP look (applied AFTER blur)."""
+    """Stage 4: Nighttime smartphone high-ISO grain, digital-zoom ISP look & night cast (applied AFTER blur)."""
 
     enabled: bool = True
     grain_amount: float = 0.35  # Overall low-light sensor grain strength (0..1)
     clumpiness: float = 0.55  # Clumpy iPhone Night Mode feel vs fine static (0..1)
     isp_smoothing: float = 0.35  # Light edge-preserving smartphone noise reduction (0..1)
     shadow_weight: float = 0.72  # Extra noise weight in dark shadows vs bright skin (0..1)
+    digital_zoom: float = 0.0  # 0..1 simulates 1x..4x smartphone pinch-zoom sensor crop + waxy ISP upscale
+    night_cast: float = 0.0  # 0..1 muted 3AM sodium-streetlight olive/amber shadow cast & highlight compression
     seed: int = 101
 
     def validated(self) -> "Stage4GrainConfig":
@@ -204,6 +206,8 @@ class Stage4GrainConfig:
             clumpiness=_clamp(self.clumpiness, 0.0, 1.0),
             isp_smoothing=_clamp(self.isp_smoothing, 0.0, 1.0),
             shadow_weight=_clamp(self.shadow_weight, 0.0, 1.0),
+            digital_zoom=_clamp(self.digital_zoom, 0.0, 1.0),
+            night_cast=_clamp(self.night_cast, 0.0, 1.0),
             seed=int(self.seed),
         )
 

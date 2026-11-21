@@ -67,7 +67,7 @@ def _make_synthetic_portrait(w: int = 960, h: int = 1200) -> np.ndarray:
 def test_presets_and_determinism() -> None:
     img = _make_synthetic_portrait(720, 900)
     presets = list_builtin_presets()
-    assert len(presets) == 6
+    assert len(presets) == 8
 
     for p in presets:
         cfg = get_builtin_preset(p["id"])
@@ -143,7 +143,7 @@ def test_fastapi_endpoints() -> None:
     assert client.get("/").status_code == 200
 
     presets = client.get("/api/presets").json()
-    assert len(presets["builtin"]) == 6
+    assert len(presets["builtin"]) == 8
 
     # Upload a test JPEG
     img = _make_synthetic_portrait(800, 1000)

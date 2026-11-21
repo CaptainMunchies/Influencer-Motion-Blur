@@ -16,6 +16,8 @@ const SHORT_PRESET_NAMES = {
   club_whip_swirl: "Club Swirl",
   moving_hands_party: "Moving Hands",
   daylight_candid_snap: "Daylight",
+  "3am_night_zoom": "3AM Zoom",
+  lofi_streetlight_blur: "Lo-Fi Night",
 };
 
 const state = {
@@ -303,6 +305,8 @@ function syncControlsFromConfig() {
   $("s4_grain_amount").value = Math.round(c.stage4_grain.grain_amount * 100);
   $("s4_clumpiness").value = Math.round(c.stage4_grain.clumpiness * 100);
   $("s4_isp_smoothing").value = Math.round(c.stage4_grain.isp_smoothing * 100);
+  $("s4_digital_zoom").value = Math.round((c.stage4_grain.digital_zoom || 0) * 100);
+  $("s4_night_cast").value = Math.round((c.stage4_grain.night_cast || 0) * 100);
 
   $("s5_enabled").checked = c.stage5_compression.enabled;
   $("s5_insta_softness").value = Math.round(c.stage5_compression.insta_softness * 100);
@@ -340,6 +344,8 @@ function readControlsIntoConfig() {
   c.stage4_grain.grain_amount = parseFloat($("s4_grain_amount").value) / 100.0;
   c.stage4_grain.clumpiness = parseFloat($("s4_clumpiness").value) / 100.0;
   c.stage4_grain.isp_smoothing = parseFloat($("s4_isp_smoothing").value) / 100.0;
+  c.stage4_grain.digital_zoom = parseFloat($("s4_digital_zoom").value) / 100.0;
+  c.stage4_grain.night_cast = parseFloat($("s4_night_cast").value) / 100.0;
 
   c.stage5_compression.enabled = $("s5_enabled").checked;
   c.stage5_compression.insta_softness = parseFloat($("s5_insta_softness").value) / 100.0;
@@ -378,6 +384,8 @@ function updateControlReadoutsAndVisibility() {
   $("val_s4_grain").textContent = `${$("s4_grain_amount").value}%`;
   $("val_s4_clump").textContent = `${$("s4_clumpiness").value}%`;
   $("val_s4_smooth").textContent = `${$("s4_isp_smoothing").value}%`;
+  $("val_s4_zoom").textContent = `${$("s4_digital_zoom").value}%`;
+  $("val_s4_cast").textContent = `${$("s4_night_cast").value}%`;
 
   $("val_s5_soft").textContent = `${$("s5_insta_softness").value}%`;
   $("val_s5_qual").textContent = $("s5_jpeg_quality").value;
@@ -1395,7 +1403,7 @@ function bindEvents() {
     "s2_flash_sharpness", "s2_outer_smear", "s2_swing_angle", "s2_swing_intensity",
     "s2_direction_angle",
     "s3_enabled", "s3_glow_amount", "s3_haze_lift", "s3_warmth", "s3_edge_fringing",
-    "s4_enabled", "s4_grain_amount", "s4_clumpiness", "s4_isp_smoothing",
+    "s4_enabled", "s4_grain_amount", "s4_clumpiness", "s4_isp_smoothing", "s4_digital_zoom", "s4_night_cast",
     "s5_enabled", "s5_insta_softness", "s5_jpeg_quality",
   ];
   for (const id of controlIds) {
