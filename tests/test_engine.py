@@ -25,7 +25,7 @@ from engine import (
     run_pipeline,
     save_preset_json,
 )
-from engine.ai_director import rasterize_guidance_to_brush_rgba
+from engine.ai_director import build_kie_chat_url, rasterize_guidance_to_brush_rgba
 
 
 def _make_synthetic_portrait(w: int = 960, h: int = 1200) -> np.ndarray:
@@ -227,7 +227,9 @@ def test_ai_director_rasterize_and_pivots() -> None:
     assert len(cfg.stage2_motion.ai_pivots) == 1
     pipe = run_pipeline(img, cfg, brush_rgba=rgba)
     assert pipe.motion_provider == "pivot_swing:ai_pivots"
-    print(f"  [OK] AI Art Director polygon rasterize + exact arm-pivot swing verified ({pipe.total_ms:.0f} ms)")
+    assert build_kie_chat_url("gemini-4-neon") == "https://api.kie.ai/gemini-4-neon-openai/v1/chat/completions"
+    assert build_kie_chat_url("gemini-3.6-flash") == "https://api.kie.ai/gemini-3-6-flash-openai/v1/chat/completions"
+    print(f"  [OK] AI Art Director polygon rasterize + exact arm-pivot swing + Kie.ai URL routing verified ({pipe.total_ms:.0f} ms)")
 
 
 if __name__ == "__main__":

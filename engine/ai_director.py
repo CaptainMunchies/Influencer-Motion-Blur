@@ -72,6 +72,14 @@ Rules for high accuracy:
 
 
 SUGGESTED_MODELS: Dict[str, List[Dict[str, str]]] = {
+    "kie": [
+        {"id": "gemini-4-neon", "label": "Gemini 4 Neon (Recommended — High-Precision Vision)"},
+        {"id": "gemini-4-hydrogen", "label": "Gemini 4 Hydrogen (Fast Frontier Vision)"},
+        {"id": "gemini-4-carbon", "label": "Gemini 4 Carbon (Max Reasoning Vision)"},
+        {"id": "gemini-3.8-flash", "label": "Gemini 3.8 Flash (Fast & Light)"},
+        {"id": "gemini-3.6-flash", "label": "Gemini 3.6 Flash"},
+        {"id": "gemini-3.1-pro", "label": "Gemini 3.1 Pro"},
+    ],
     "gemini": [
         {"id": "gemini-4-hydrogen", "label": "Gemini 4 Hydrogen (Fast Frontier Vision)"},
         {"id": "gemini-4-neon", "label": "Gemini 4 Neon (High-Precision Vision)"},
@@ -303,6 +311,114 @@ def _call_openai_compat_vision(b64: str, mime: str, cfg: VisionDirectorConfig, u
         return str(content)
 
 
+def build_kie_chat_url(model: str) -> str:
+    """Build Kie.ai's OpenAI-compatible chat completions URL for any model ID.
+
+    Kie.ai routes Gemini models via `https://api.kie.ai/{slug}-openai/v1/chat/completions`,
+    converting dots to hyphens (e.g. `gemini-3.6-flash` -> `gemini-3-6-flash-openai`).
+    If the user enters a full URL or already includes `-openai`, preserve it cleanly.
+    """
+    m = model.strip()
+    if m.startswith("http://") or m.startswith("https://"):
+        return m
+    slug = m.lower().replace(".", "-").strip("/")
+    if not slug.endswith("-openai"):
+        slug = f"{slug}-openai"
+    return f"https://api.kie.ai/{slug}/v1/chat/completions"
+
+
+def _upload_base64_to_kie(b64: str, mime: str, api_key: str) -> Optional[str]:
+    """Upload temporary JPEG to Kie.ai's official Base64 File Upload utility (auto-expires in 24h)."""
+    url = "https://kieai.redpandaai.co/api/file-base64-upload"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "base64Data": f"data:{mime};base64,{b64}",
+        "uploadPath": "influencer-blur-lab/temp",
+        "fileName": "director_input.jpg",
+    }
+    try:
+        with httpx.Client(timeout=25.0) as client:
+            resp = client.post(url, headers=headers, json=payload)
+            if resp.status_code >= 400:
+                return None
+            body = resp.json()
+            data = body.get("data") if isinstance(body.get("data"), dict) else body
+            for field_name in ("downloadUrl", "fileUrl", "url"):
+                val = data.get(field_name) if isinstance(data, dict) else None
+                if isinstance(val, str) and val.startswith("http"):
+                    return val
+    except Exception:
+        return None
+    return None
+
+
+def _call_kie_vision(b64: str, mime: str, cfg: VisionDirectorConfig, user_goal: str) -> str:
+    """Call Kie.ai's OpenAI-compatible multimodal endpoint (e.g. Gemini 4 Neon / Hydrogen / Carbon)."""
+    url = build_kie_chat_url(cfg.model)
+    headers = {
+        "Authorization": f"Bearer {cfg.api_key}",
+        "Content-Type": "application/json",
+    }
+
+    # Kie.ai multimodal routes reliably accept hosted URLs via their temp upload utility;
+    # fall back seamlessly to inline data URI if upload utility is unreachable.
+    hosted_url = _upload_base64_to_kie(b64, mime, cfg.api_key)
+    image_ref = hosted_url or f"data:{mime};base64,{b64}"
+
+    prompt = DIRECTOR_SYSTEM_PROMPT
+    if user_goal:
+        prompt += f"\n\nUser's target look / instruction: {user_goal}"
+
+    base_payload: Dict[str, Any] = {
+        "model": cfg.model,
+        "stream": False,
+        "temperature": 0.15,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": image_ref}},
+                ],
+            }
+        ],
+    }
+
+    with httpx.Client(timeout=75.0) as client:
+        # Try with JSON response_format first; if a Kie.ai proxy route rejects response_format, retry cleanly without it.
+        payload = dict(base_payload, response_format={"type": "json_object"})
+        resp = client.post(url, headers=headers, json=payload)
+        if resp.status_code == 400 and "response_format" in resp.text.lower():
+            resp = client.post(url, headers=headers, json=base_payload)
+
+        if resp.status_code >= 400:
+            detail = resp.text[:400]
+            try:
+                j = resp.json()
+                detail = j.get("msg") or j.get("message") or j.get("error", {}).get("message", detail)
+            except Exception:
+                pass
+            raise RuntimeError(f"Kie.ai API error ({resp.status_code}): {detail}")
+
+        data = resp.json()
+        # Handle Kie.ai envelope errors that return HTTP 200 with non-200 code
+        if isinstance(data.get("code"), int) and data["code"] not in (0, 200) and not data.get("choices"):
+            raise RuntimeError(f"Kie.ai error ({data['code']}): {data.get('msg') or data.get('message') or 'Request failed'}")
+
+        choices = data.get("choices") or []
+        if not choices:
+            raise RuntimeError("Kie.ai returned no choices for this image.")
+        content = choices[0].get("message", {}).get("content", "")
+        if isinstance(content, list):
+            content = "".join(p.get("text", "") for p in content if isinstance(p, dict))
+        if not str(content).strip():
+            raise RuntimeError("Kie.ai returned an empty response.")
+        return str(content)
+
+
 def direct_photo_with_ai(
     rgb_u8: np.ndarray,
     director_cfg: VisionDirectorConfig,
@@ -312,11 +428,13 @@ def direct_photo_with_ai(
     cfg = director_cfg.validated()
     if not cfg.api_key:
         raise ValueError(
-            "No Vision AI API key is saved yet. Click the gear icon (⚙) in the top right to paste your Gemini, OpenAI, or OpenRouter key."
+            "No Vision AI API key is saved yet. Click the gear icon (⚙) in the top right to paste your Kie.ai, Gemini, OpenAI, or OpenRouter key."
         )
 
     b64, mime = _encode_image_for_vision(rgb_u8)
-    if cfg.provider == "gemini":
+    if cfg.provider == "kie":
+        raw_text = _call_kie_vision(b64, mime, cfg, user_goal)
+    elif cfg.provider == "gemini":
         raw_text = _call_gemini_vision(b64, mime, cfg, user_goal)
     else:
         raw_text = _call_openai_compat_vision(b64, mime, cfg, user_goal)
@@ -412,8 +530,8 @@ def apply_director_guidance_to_config(
 def list_available_vision_models(provider: str, api_key: str) -> List[Dict[str, str]]:
     """Query the live provider API to fetch the newest vision-capable model IDs for this key."""
     key = (api_key or "").strip()
-    fallback = SUGGESTED_MODELS.get(provider, SUGGESTED_MODELS["gemini"])
-    if not key:
+    fallback = SUGGESTED_MODELS.get(provider, SUGGESTED_MODELS["kie"])
+    if not key or provider == "kie":
         return fallback
 
     try:

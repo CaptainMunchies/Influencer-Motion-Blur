@@ -148,7 +148,7 @@ def _load_vision_settings() -> VisionDirectorConfig:
     sub = data.get("vision_director") if isinstance(data.get("vision_director"), dict) else {}
     try:
         return VisionDirectorConfig(
-            provider=sub.get("provider", "gemini"),
+            provider=sub.get("provider", "kie"),
             api_key=sub.get("api_key", ""),
             model=sub.get("model", ""),
         ).validated()
@@ -220,9 +220,9 @@ class SavePresetRequest(BaseModel):
 
 class SettingsUpdateRequest(BaseModel):
     # Vision AI Art Director (masks, face center, arm pivots — never regenerates pixels)
-    vision_provider: str = "gemini"
+    vision_provider: str = "kie"
     vision_api_key: str = "__KEEP__"
-    vision_model: str = "gemini-4-hydrogen"
+    vision_model: str = "gemini-4-neon"
     # Optional Cloud AI Motion (legacy/optional fal.ai or Replicate)
     provider: str = "fal"
     api_key: str = "__KEEP__"
@@ -346,7 +346,7 @@ def ai_direct_photo(req: AIDirectRequest) -> Dict[str, Any]:
     if not v_cfg.api_key:
         raise HTTPException(
             status_code=400,
-            detail="Add your Gemini, OpenAI, or OpenRouter API key in Settings (⚙) first to use AI Auto-Paint.",
+            detail="Add your Kie.ai, Gemini, OpenAI, or OpenRouter API key in Settings (⚙) first to use AI Auto-Paint.",
         )
 
     try:

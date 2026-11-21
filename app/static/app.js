@@ -634,7 +634,7 @@ async function runAIAutoPaint() {
   const sResp = await fetch("/api/settings");
   const sData = await sResp.json();
   if (!sData.vision_has_api_key) {
-    showToast("Paste your Gemini, OpenAI, or OpenRouter API key first.");
+    showToast("Paste your Kie.ai, Gemini, OpenAI, or OpenRouter API key first.");
     await openSettingsModal();
     $("visionKeyInput").focus();
     return;
@@ -982,12 +982,12 @@ async function openSettingsModal() {
   state.suggestedModels = data.suggested_models || {};
   state.visionHasKey = Boolean(data.vision_has_api_key);
 
-  const vProv = data.vision_provider || "gemini";
+  const vProv = data.vision_provider || "kie";
   $("visionProviderSelect").value = vProv;
   $("visionKeyInput").value = data.vision_has_api_key ? "__KEEP__" : "";
   $("visionKeyStatus").textContent = data.vision_has_api_key
     ? `Saved key: ${data.vision_api_key_preview} (clear box to remove)`
-    : "Paste a Gemini, OpenAI, or OpenRouter key to enable ✨ AI Auto-Paint.";
+    : "Paste your Kie.ai, Gemini, OpenAI, or OpenRouter key to enable ✨ AI Auto-Paint.";
   populateVisionModelsDropdown(state.suggestedModels[vProv] || [], data.vision_model);
 
   $("cloudProviderSelect").value = data.provider || "fal";

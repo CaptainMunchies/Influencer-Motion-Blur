@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Literal, Optional
 FocusFalloffMode = Literal["uniform", "face_center", "edges"]
 MotionMethod = Literal["handheld_shake", "flash_drag", "pivot_swing", "cloud_ai"]
 CloudProviderName = Literal["fal", "replicate"]
-VisionProviderName = Literal["gemini", "openai", "openrouter"]
+VisionProviderName = Literal["kie", "gemini", "openai", "openrouter"]
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:
@@ -85,13 +85,14 @@ class CloudAIConfig:
 class VisionDirectorConfig:
     """Settings for the AI Art Director (guides masks, focus center & pivots; never regenerates pixels)."""
 
-    provider: VisionProviderName = "gemini"
+    provider: VisionProviderName = "kie"
     api_key: str = ""
-    model: str = "gemini-4-hydrogen"
+    model: str = "gemini-4-neon"
 
     def validated(self) -> "VisionDirectorConfig":
-        provider = self.provider if self.provider in ("gemini", "openai", "openrouter") else "gemini"
+        provider = self.provider if self.provider in ("kie", "gemini", "openai", "openrouter") else "kie"
         default_models = {
+            "kie": "gemini-4-neon",
             "gemini": "gemini-4-hydrogen",
             "openai": "gpt-6.2-sol",
             "openrouter": "google/gemini-4-hydrogen",
