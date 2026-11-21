@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Influencer Blur Lab</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <!-- Top Studio Header -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-dot"></div>
+      <div>
+        <div class="brand-title">Influencer Blur Lab</div>
+        <div class="brand-sub">Authentic Phone Blur &amp; Night Optics Studio</div>
+      </div>
+    </div>
+
+    <nav class="main-tabs" role="tablist">
+      <button class="tab-btn active" data-tab="qa" role="tab" aria-selected="true">
+        Step-by-Step QA
+      </button>
+      <button class="tab-btn" data-tab="showdown" role="tab" aria-selected="false">
+        Option Showdown
+      </button>
+    </nav>
+
+    <div class="topbar-actions">
+      <span id="statusPill" class="status-pill hidden">Ready</span>
+      <label class="btn btn-secondary upload-label" for="fileInput">
+        Upload Photo
+      </label>
+      <input id="fileInput" type="file" accept="image/jpeg,image/png,image/webp" hidden />
+      <button id="downloadBtn" class="btn btn-primary" disabled>
+        Download Final Result
+      </button>
+      <button id="settingsBtn" class="btn btn-icon" title="Optional Cloud AI Settings" aria-label="Settings">
+        ⚙
+      </button>
+    </div>
+  </header>
+
+  <!-- Preset Strip -->
+  <section class="preset-bar">
+    <div class="preset-bar-left">
+      <span class="preset-bar-label">Quick Looks:</span>
+      <div id="presetList" class="preset-pills"></div>
+    </div>
+    <div class="preset-bar-right">
+      <button id="savePresetBtn" class="btn btn-ghost btn-sm">
+        + Save My Preset
+      </button>
+    </div>
+  </section>
+
+  <!-- Global Empty Dropzone (shown before first photo upload) -->
+  <main id="emptyState" class="empty-state">
+    <div id="dropzone" class="dropzone">
+      <div class="dropzone-icon">📸</div>
+      <h1>Drop a photo here to start testing</h1>
+      <p>Supports JPG, PNG, and WebP. Runs fast right on your computer — no cloud account needed.</p>
+      <label class="btn btn-primary btn-lg upload-label" for="fileInput">
+        Choose a Photo
+      </label>
+      <div class="dropzone-looks">
+        <div class="look-chip">✨ Flash Party Blur</div>
+        <div class="look-chip">🌙 Warm Night Missed Focus</div>
+        <div class="look-chip">🪞 Quick Gym Mirror Snap</div>
+      </div>
+    </div>
+  </main>
+
+  <!-- TAB 1: STEP-BY-STEP QA -->
+  <main id="tab-qa" class="workspace hidden">
+    <div class="qa-main">
+      <!-- Filmstrip (Original + Stages 1..5 with individual ON/OFF toggles) -->
+      <div class="filmstrip-wrap">
+        <div id="filmstrip" class="filmstrip"></div>
+      </div>
+
+      <!-- Viewer Toolbar -->
+      <div class="viewer-toolbar">
+        <div class="toolbar-group">
+          <button id="modeSideBtn" class="seg-btn active">Side-by-Side</button>
+          <button id="modeWipeBtn" class="seg-btn">Wipe Slider</button>
+          <button id="zoomBtn" class="seg-btn">100% Zoom</button>
+        </div>
+
+        <div class="toolbar-group brush-group">
+          <span class="toolbar-label">Focus Brush:</span>
+          <button class="brush-btn active" data-brush="off">Off</button>
+          <button class="brush-btn brush-sharp" data-brush="sharp">Keep Sharp</button>
+          <button class="brush-btn brush-blur" data-brush="blur">Make Blurry</button>
+          <label class="brush-size-wrap" title="Brush Size">
+            <span>Size</span>
+            <input id="brushSizeInput" type="range" min="16" max="120" value="54" />
+          </label>
+          <button id="clearBrushBtn" class="btn btn-ghost btn-xs">Clear</button>
+        </div>
+      </div>
+
+      <!-- Notice Banner (e.g. optional Cloud AI note) -->
+      <div id="noteBanner" class="note-banner hidden"></div>
+
+      <!-- Main Comparison Stage -->
+      <div id="viewerStage" class="viewer-stage">
+        <!-- Side-by-Side View -->
+        <div id="sideBySideView" class="side-by-side">
+          <div class="pane">
+            <div class="pane-badge">Original</div>
+            <div class="pane-viewport" id="leftViewport">
+              <div class="image-stack" id="leftStack">
+                <img id="origImg" alt="Original photo" draggable="false" />
+                <canvas id="brushCanvas" class="brush-canvas"></canvas>
+              </div>
+            </div>
+          </div>
+          <div class="pane">
+            <div class="pane-badge" id="rightBadge">Stage 5 — Instagram Polish</div>
+            <div class="pane-viewport" id="rightViewport">
+              <div class="image-stack" id="rightStack">
+                <img id="stageImg" alt="Processed stage" draggable="false" />
+                <canvas id="brushMirrorCanvas" class="brush-canvas readonly"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Before / After Wipe Slider View -->
+        <div id="wipeView" class="wipe-view hidden">
+          <div class="wipe-viewport" id="wipeViewport">
+            <div class="wipe-stack" id="wipeStack">
+              <img id="wipeAfterImg" class="wipe-img" alt="After" draggable="false" />
+              <div id="wipeClip" class="wipe-clip">
+                <img id="wipeBeforeImg" class="wipe-img" alt="Original" draggable="false" />
+              </div>
+              <div id="wipeHandle" class="wipe-handle">
+                <div class="wipe-knob">↔</div>
+              </div>
+              <div class="pane-badge wipe-badge-left">Original</div>
+              <div class="pane-badge wipe-badge-right" id="wipeRightBadge">Final Result</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Subtle Loading Overlay -->
+        <div id="loadingOverlay" class="loading-overlay hidden">
+          <div class="spinner"></div>
+          <span>Updating photo…</span>
+        </div>
+      </div>
+
+      <div id="brushHint" class="brush-hint hidden">
+        Tip: Paint <strong>green</strong> over the face to keep it sharp, or <strong>red</strong> over moving hands/arms to blur them.
+      </div>
+    </div>
+
+    <!-- Right Controls Sidebar -->
+    <aside class="controls-panel">
+      <div class="controls-header">
+        <div>
+          <h2 id="activeLookTitle">Flash Party Blur</h2>
+          <p id="activeLookDesc" class="controls-sub">Adjust any slider below — every step updates cleanly.</p>
+        </div>
+      </div>
+
+      <div class="controls-apply-bar">
+        <button id="applyBtn" class="btn btn-primary btn-full">Apply Changes</button>
+        <label class="auto-toggle">
+          <input id="autoApplyCheck" type="checkbox" checked />
+          <span>Auto-update</span>
+        </label>
+      </div>
+
+      <div class="controls-scroll">
+        <!-- Stage 1 -->
+        <div class="control-card" data-stage-card="stage1">
+          <div class="control-card-head">
+            <span class="stage-num">1</span>
+            <span class="stage-name">Missed Focus</span>
+            <label class="switch">
+              <input type="checkbox" id="s1_enabled" checked />
+              <span class="slider-switch"></span>
+            </label>
+          </div>
+          <div class="control-body">
+            <div class="field">
+              <div class="field-label">
+                <span>Focus Softness</span>
+                <span class="field-val" id="val_s1_radius">1.4</span>
+              </div>
+              <input type="range" id="s1_radius" min="0" max="14" step="0.1" value="1.35" />
+            </div>
+            <div class="field">
+              <div class="field-label">
+                <span>Focus Area</span>
+              </div>
+              <select id="s1_falloff_mode">
+                <option value="face_center">Keep Face Sharper</option>
+                <option value="edges">Keep Center Sharper</option>
+                <option value="uniform">Whole Photo Soft</option>
+              </select>
+            </div>
+            <div class="field" id="wrap_s1_falloff">
+              <div class="field-label">
+                <span>Face Protection Strength</span>
+                <span class="field-val" id="val_s1_falloff">72%</span>
+              </div>
+              <input type="range" id="s1_falloff_strength" min="0" max="100" step="1" value="72" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Stage 2 -->
+        <div class="control-card" data-stage-card="stage2">
+          <div class="control-card-head">
+            <span class="stage-num">2</span>
+            <span class="stage-name">Motion &amp; Flash Blur</span>
+            <label class="switch">
+              <input type="checkbox" id="s2_enabled" checked />
+              <span class="slider-switch"></span>
+            </label>
+          </div>
+          <div class="control-body">
+            <div class="field">
+              <div class="field-label"><span>Motion Style</span></div>
+              <select id="s2_method">
+                <option value="handheld_shake">Handheld Micro-Shake</option>
+                <option value="flash_drag">Flash Party Drag</option>
+                <option value="pivot_swing">Moving Hands Swing</option>
+                <option value="cloud_ai">Cloud AI (Optional Key)</option>
+              </select>
+            </div>
+
+            <div class="field" id="wrap_s2_shake">
+              <div class="field-label">
+                <span>Hand Shake</span>
+                <span class="field-val" id="val_s2_shake">14</span>
+              </div>
+              <input type="range" id="s2_shake_amount" min="0" max="34" step="0.5" value="14" />
+            </div>
+
+            <div class="field" id="wrap_s2_ghost">
+              <div class="field-label">
+                <span>Double-Image Ghosting</span>
+                <span class="field-val" id="val_s2_ghost">48%</span>
+              </div>
+              <input type="range" id="s2_ghost_strength" min="0" max="100" step="1" value="48" />
+            </div>
+
+            <div class="field" id="wrap_s2_flash">
+              <div class="field-label">
+                <span>Flash Sharpness</span>
+                <span class="field-val" id="val_s2_flash">68%</span>
+              </div>
+              <input type="range" id="s2_flash_sharpness" min="35" max="92" step="1" value="68" />
+            </div>
+
+            <div class="field" id="wrap_s2_outer">
+              <div class="field-label">
+                <span>Moving Edges / Arms Smear</span>
+                <span class="field-val" id="val_s2_outer">74%</span>
+              </div>
+              <input type="range" id="s2_outer_smear" min="0" max="100" step="1" value="74" />
+            </div>
+
+            <div class="field hidden" id="wrap_s2_swing">
+              <div class="field-label">
+                <span>Arm Swing Arc</span>
+                <span class="field-val" id="val_s2_swing">8.5°</span>
+              </div>
+              <input type="range" id="s2_swing_angle" min="2" max="18" step="0.5" value="8.5" />
+            </div>
+
+            <div class="field hidden" id="wrap_s2_swing_int">
+              <div class="field-label">
+                <span>Arm Swing Strength</span>
+                <span class="field-val" id="val_s2_swing_int">80%</span>
+              </div>
+              <input type="range" id="s2_swing_intensity" min="0" max="100" step="1" value="80" />
+            </div>
+
+            <div class="field" id="wrap_s2_angle">
+              <div class="field-label">
+                <span>Shake Direction</span>
+                <span class="field-val" id="val_s2_angle">18°</span>
+              </div>
+              <input type="range" id="s2_direction_angle" min="-180" max="180" step="5" value="18" />
+            </div>
+
+            <button id="rerollShakeBtn" class="btn btn-ghost btn-xs btn-full">
+              🎲 Try Different Natural Shake Pattern
+            </button>
+          </div>
+        </div>
+
+        <!-- Stage 3 -->
+        <div class="control-card" data-stage-card="stage3">
+          <div class="control-card-head">
+            <span class="stage-num">3</span>
+            <span class="stage-name">Dirty Lens Glow</span>
+            <label class="switch">
+              <input type="checkbox" id="s3_enabled" checked />
+              <span class="slider-switch"></span>
+            </label>
+          </div>
+          <div class="control-body">
+            <div class="field">
+              <div class="field-label">
+                <span>Dirty Lens Glow</span>
+                <span class="field-val" id="val_s3_glow">40%</span>
+              </div>
+              <input type="range" id="s3_glow_amount" min="0" max="100" step="1" value="40" />
+            </div>
+            <div class="field">
+              <div class="field-label">
+                <span>Hazy Night Shadows</span>
+                <span class="field-val" id="val_s3_haze">30%</span>
+              </div>
+              <input type="range" id="s3_haze_lift" min="0" max="100" step="1" value="30" />
+            </div>
+            <div class="field">
+              <div class="field-label">
+                <span>Warm Glow Tint</span>
+                <span class="field-val" id="val_s3_warmth">18%</span>
+              </div>
+              <input type="range" id="s3_warmth" min="0" max="100" step="1" value="18" />
+            </div>
+            <div class="field">
+              <div class="field-label">
+                <span>Subtle Edge Color Fringe</span>
+                <span class="field-val" id="val_s3_fringe">22%</span>
+              </div>
+              <input type="range" id="s3_edge_fringing" min="0" max="100" step="1" value="22" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Stage 4 -->
+        <div class="control-card" data-stage-card="stage4">
+          <div class="control-card-head">
+            <span class="stage-num">4</span>
+            <span class="stage-name">Nighttime Grain</span>
+            <label class="switch">
+              <input type="checkbox" id="s4_enabled" checked />
+              <span class="slider-switch"></span>
+            </label>
+          </div>
+          <div class="control-body">
+            <div class="field">
+              <div class="field-label">
+                <span>Nighttime Grain</span>
+                <span class="field-val" id="val_s4_grain">46%</span>
+              </div>
+              <input type="range" id="s4_grain_amount" min="0" max="100" step="1" value="46" />
+            </div>
+            <div class="field">
+              <div class="field-label">
+                <span>Clumpy Phone Texture</span>
+                <span class="field-val" id="val_s4_clump">58%</span>
+              </div>
+              <input type="range" id="s4_clumpiness" min="0" max="100" step="1" value="58" />
+            </div>
+            <div class="field">
+              <div class="field-label">
+                <span>Phone Night Smoothness</span>
+                <span class="field-val" id="val_s4_smooth">34%</span>
+              </div>
+              <input type="range" id="s4_isp_smoothing" min="0" max="100" step="1" value="34" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Stage 5 -->
+        <div class="control-card" data-stage-card="stage5">
+          <div class="control-card-head">
+            <span class="stage-num">5</span>
+            <span class="stage-name">Instagram Polish</span>
+            <label class="switch">
+              <input type="checkbox" id="s5_enabled" checked />
+              <span class="slider-switch"></span>
+            </label>
+          </div>
+          <div class="control-body">
+            <div class="field">
+              <div class="field-label">
+                <span>Instagram Softness</span>
+                <span class="field-val" id="val_s5_soft">22%</span>
+              </div>
+              <input type="range" id="s5_insta_softness" min="0" max="100" step="1" value="22" />
+            </div>
+            <div class="field">
+              <div class="field-label">
+                <span>Upload Quality</span>
+                <span class="field-val" id="val_s5_qual">82</span>
+              </div>
+              <input type="range" id="s5_jpeg_quality" min="72" max="95" step="1" value="82" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <!-- TAB 2: OPTION SHOWDOWN -->
+  <main id="tab-showdown" class="showdown-workspace hidden">
+    <div class="showdown-bar">
+      <div class="showdown-bar-left">
+        <h2>Option Showdown</h2>
+        <p>Compare 3 blur options side-by-side against your original photo and pick the best one.</p>
+      </div>
+      <div class="showdown-bar-right">
+        <select id="showdownModeSelect">
+          <option value="methods">Compare 3 Motion Styles (Shake vs Flash Drag vs Arm Swing)</option>
+          <option value="presets">Compare 3 Built-In Looks (Party vs Warm Night vs Gym Mirror)</option>
+        </select>
+        <button id="showdownZoomBtn" class="seg-btn">100% Zoom</button>
+        <button id="runShowdownBtn" class="btn btn-primary">Run Showdown</button>
+      </div>
+    </div>
+
+    <div id="showdownGrid" class="showdown-grid"></div>
+  </main>
+
+  <!-- Save Preset Modal -->
+  <div id="presetModal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3>Save My Custom Preset</h3>
+        <button class="modal-close" data-close-modal="presetModal">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="field">
+          <label class="field-label" for="presetNameInput">Preset Name</label>
+          <input id="presetNameInput" type="text" placeholder="e.g. Rooftop Flash Look" />
+        </div>
+        <div class="field">
+          <label class="field-label" for="presetDescInput">Short Note (optional)</label>
+          <input id="presetDescInput" type="text" placeholder="e.g. Crisp face with soft moving hands" />
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-ghost" data-close-modal="presetModal">Cancel</button>
+        <button id="confirmSavePresetBtn" class="btn btn-primary">Save Preset</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Optional Cloud AI Settings Drawer -->
+  <div id="settingsModal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3>Optional Cloud AI Settings</h3>
+        <button class="modal-close" data-close-modal="settingsModal">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="settings-reassure">
+          Totally optional! Influencer Blur Lab runs fast right on your PC with zero API keys.
+          Add a fal.ai or Replicate key here only if you want to compare a Cloud AI blur option later.
+        </p>
+        <div class="field">
+          <label class="field-label" for="cloudProviderSelect">Cloud Service</label>
+          <select id="cloudProviderSelect">
+            <option value="fal">fal.ai</option>
+            <option value="replicate">Replicate</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="field-label" for="cloudKeyInput">API Key</label>
+          <input id="cloudKeyInput" type="password" placeholder="Leave blank to stay 100% local" />
+          <div id="cloudKeyStatus" class="field-hint"></div>
+        </div>
+        <div class="field">
+          <label class="field-label" for="cloudModelInput">Model Name (optional)</label>
+          <input id="cloudModelInput" type="text" placeholder="Default model used if blank" />
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-ghost" data-close-modal="settingsModal">Close</button>
+        <button id="saveSettingsBtn" class="btn btn-primary">Save Settings</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
