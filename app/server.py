@@ -70,12 +70,18 @@ class UploadedPhoto:
         full_rgb: np.ndarray,
         preview_rgb: np.ndarray,
         subject_center: tuple[float, float] = (0.50, 0.34),
+        original_url: str = "",
+        thumb_url: str = "",
     ):
         self.image_id = image_id
         self.filename = filename
         self.full_rgb = full_rgb
         self.preview_rgb = preview_rgb
         self.subject_center = subject_center
+        self.original_url = original_url
+        self.thumb_url = thumb_url
+        self.last_look = "Auto-Match"
+        self.last_ms = 0.0
         self.created_at = time.time()
 
 
@@ -439,16 +445,24 @@ async def upload_photo(file: UploadFile = File(...)) -> Dict[str, Any]:
 
     image_id = uuid.uuid4().hex[:12]
     initial_analysis = analyze_and_build_auto_config(preview_rgb, strength=1.0)
+    orig_url = _store_render(preview_rgb, quality=94)
+
+    # Tiny thumbnail for Screen 01 Recent strip
+    thumb_pil = Image.fromarray(preview_rgb, mode="RGB")
+    thumb_pil.thumbnail((160, 160), Image.Resampling.LANCZOS)
+    thumb_url = _store_render(np.array(thumb_pil, dtype=np.uint8), quality=82)
+
     PHOTOS[image_id] = UploadedPhoto(
         image_id=image_id,
         filename=file.filename or "photo.jpg",
         full_rgb=full_rgb,
         preview_rgb=preview_rgb,
         subject_center=initial_analysis.subject_center,
+        original_url=orig_url,
+        thumb_url=thumb_url,
     )
     _prune_caches()
 
-    orig_url = _store_render(preview_rgb, quality=94)
     ph, pw = preview_rgb.shape[:2]
     return {
         "image_id": image_id,
@@ -459,6 +473,58 @@ async def upload_photo(file: UploadFile = File(...)) -> Dict[str, Any]:
         "preview_height": ph,
         "subject_center": list(initial_analysis.subject_center),
         "original_url": orig_url,
+        "thumb_url": thumb_url,
+    }
+
+
+@app.get("/api/recent")
+def list_recent_photos() -> Dict[str, Any]:
+    items = sorted(PHOTOS.values(), key=lambda p: p.created_at, reverse=True)[:4]
+    out = []
+    for p in items:
+        fh, fw = p.full_rgb.shape[:2]
+        ph, pw = p.preview_rgb.shape[:2]
+        # Ensure thumb & original tokens are still alive in RENDER_CACHE
+        thumb_token = p.thumb_url.split("/")[-1].replace(".jpg", "") if p.thumb_url else ""
+        if not thumb_token or thumb_token not in RENDER_CACHE:
+            tp = Image.fromarray(p.preview_rgb, mode="RGB")
+            tp.thumbnail((160, 160), Image.Resampling.LANCZOS)
+            p.thumb_url = _store_render(np.array(tp, dtype=np.uint8), quality=82)
+        out.append({
+            "image_id": p.image_id,
+            "filename": p.filename,
+            "thumb_url": p.thumb_url,
+            "last_look": p.last_look,
+            "last_ms": round(p.last_ms, 1),
+            "full_width": fw,
+            "full_height": fh,
+            "preview_width": pw,
+            "preview_height": ph,
+        })
+    return {"recent": out}
+
+
+@app.get("/api/photos/{image_id}")
+def get_photo_session(image_id: str) -> Dict[str, Any]:
+    p = PHOTOS.get(image_id)
+    if p is None:
+        raise HTTPException(status_code=404, detail="Photo session expired. Please upload your photo again.")
+    orig_token = p.original_url.split("/")[-1].replace(".jpg", "") if p.original_url else ""
+    if not orig_token or orig_token not in RENDER_CACHE:
+        p.original_url = _store_render(p.preview_rgb, quality=94)
+    p.created_at = time.time()
+    fh, fw = p.full_rgb.shape[:2]
+    ph, pw = p.preview_rgb.shape[:2]
+    return {
+        "image_id": p.image_id,
+        "filename": p.filename,
+        "full_width": fw,
+        "full_height": fh,
+        "preview_width": pw,
+        "preview_height": ph,
+        "subject_center": list(p.subject_center),
+        "original_url": p.original_url,
+        "thumb_url": p.thumb_url,
     }
 
 
@@ -517,6 +583,9 @@ def auto_process_preview(req: AutoProcessRequest) -> Dict[str, Any]:
     if ai_note:
         notes.insert(0, ai_note)
 
+    photo.last_look = analysis.archetype_label or "Auto-Match"
+    photo.last_ms = float(res.total_ms)
+
     return {
         "image_id": req.image_id,
         "analysis": {
@@ -559,6 +628,8 @@ def process_preview(req: ProcessRequest) -> Dict[str, Any]:
         key: _store_render(img, quality=94 if key != "stage5" else 96)
         for key, img in res.stages.items()
     }
+    photo.last_look = cfg.name or "Custom Look"
+    photo.last_ms = float(res.total_ms)
     return {
         "image_id": req.image_id,
         "stages": stage_urls,
@@ -602,9 +673,12 @@ def run_showdown(req: ShowdownRequest) -> Dict[str, Any]:
             "config": cfg.to_dict(),
         })
 
+    fh, fw = photo.full_rgb.shape[:2]
     return {
         "image_id": req.image_id,
         "original_url": original_url,
+        "full_width": fw,
+        "full_height": fh,
         "options": results,
         "total_ms": round((time.perf_counter() - t_all) * 1000.0, 2),
     }

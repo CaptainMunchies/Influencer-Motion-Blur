@@ -4,459 +4,577 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Influencer Blur Lab</title>
-  <link rel="stylesheet" href="/static/styles.css?v=7" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css?v=8" />
 </head>
 <body>
-  <!-- Single Compact Studio Header -->
+  <!-- Unified 52px Matte Instrument Top Bar -->
   <header class="topbar">
     <div class="topbar-left">
-      <div class="brand">
-        <div class="brand-dot"></div>
+      <button id="brandHomeBtn" class="brand" type="button" title="Back to Drop & Start">
+        <span class="brand-badge">
+          <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" fill="none" stroke="#0E0F11" stroke-width="2.5" />
+            <circle cx="12" cy="12" r="3" fill="none" stroke="#0E0F11" stroke-width="2.5" />
+          </svg>
+        </span>
         <span class="brand-title">Blur Lab</span>
-      </div>
+      </button>
 
-      <nav class="main-tabs" role="tablist">
-        <button class="tab-btn active" data-tab="qa" role="tab" aria-selected="true">
+      <nav class="mode-switcher" role="tablist" aria-label="Workspace mode">
+        <button class="tab-btn active" data-tab="qa" role="tab" aria-selected="true" type="button">
           Studio
         </button>
-        <button class="tab-btn" data-tab="showdown" role="tab" aria-selected="false">
+        <button class="tab-btn" data-tab="showdown" role="tab" aria-selected="false" type="button">
           Showdown
         </button>
       </nav>
-    </div>
 
-    <!-- Layer 1 (Auto-Match) + Layer 2 (Optional 1-Click Presets) -->
-    <div class="topbar-center">
-      <div id="presetList" class="preset-pills"></div>
-      <button id="savePresetBtn" class="btn btn-ghost btn-xxs" title="Save your current look as a custom preset">
-        + Save
-      </button>
+      <div id="fileMetaBar" class="file-meta hidden">
+        <span id="fileNameLabel" class="file-name">photo.jpg</span>
+        <span id="statusText" class="file-status">Ready</span>
+      </div>
     </div>
 
     <div class="topbar-right">
-      <span id="statusPill" class="status-pill hidden">Ready</span>
-      <button id="toggleAdvancedBtn" class="btn btn-secondary btn-sm" title="Layer 3: Open step-by-step filmstrip, Focus Brush, and individual sliders">
-        🎛️ Fine-Tune
+      <!-- Shown on Screen 01 (Empty Dropzone) -->
+      <button id="visionReadyPill" class="vision-pill hidden" type="button" title="Click to configure Vision AI settings">
+        <span class="led-dot"></span>
+        <span id="visionReadyLabel">Local Engine Ready</span>
       </button>
-      <label class="btn btn-secondary btn-sm upload-label" for="fileInput">
-        Upload
+
+      <!-- Shown on Screens 02 / 03 / 04 (Active Photo) -->
+      <label id="newPhotoBtn" class="btn btn-surface hidden" for="fileInput" title="Upload a different photo">
+        <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+          <polyline points="17 8 12 3 7 8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+          <line x1="12" y1="3" x2="12" y2="15" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+        </svg>
+        <span>New Photo</span>
       </label>
-      <input id="fileInput" type="file" accept="image/jpeg,image/png,image/webp" hidden />
-      <button id="downloadBtn" class="btn btn-primary btn-sm" disabled>
-        Download
+
+      <button id="toggleAdvancedBtn" class="btn btn-subtle hidden" type="button" title="Open zero-scroll Fine-Tune inspector, AI Mask brush, and 5-stage filmstrip">
+        <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true">
+          <line x1="4" y1="21" x2="4" y2="14" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+          <line x1="4" y1="10" x2="4" y2="3" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+          <line x1="12" y1="21" x2="12" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+          <line x1="12" y1="8" x2="12" y2="3" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+          <line x1="20" y1="21" x2="20" y2="16" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+          <line x1="20" y1="12" x2="20" y2="3" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+        </svg>
+        <span id="toggleAdvancedLabel">Fine-Tune</span>
       </button>
-      <button id="settingsBtn" class="btn btn-icon" title="AI Director & API Settings (Kie.ai / Gemini / OpenAI)" aria-label="Settings">
-        ⚙
+
+      <button id="downloadBtn" class="btn btn-amber hidden" type="button" disabled>
+        Export Full-Res
+      </button>
+
+      <input id="fileInput" type="file" accept="image/jpeg,image/png,image/webp" hidden />
+
+      <button id="settingsBtn" class="btn-icon" type="button" title="AI Director &amp; API Settings" aria-label="Settings">
+        <svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.85 1 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+        </svg>
       </button>
     </div>
   </header>
 
-  <!-- Global Empty Dropzone -->
-  <main id="emptyState" class="empty-state">
-    <div id="dropzone" class="dropzone">
-      <div class="dropzone-icon">📸</div>
-      <h1>Drop any photo — we'll match the blur automatically</h1>
-      <p>
-        Reads the lighting, finds your subject, and applies tasteful Instagram smartphone blur in ~1 second.
-        No sliders required — presets &amp; fine-tuning are optional if you want to experiment.
-      </p>
-      <label class="btn btn-primary btn-lg upload-label" for="fileInput">
-        Choose a Photo
-      </label>
-      <div class="dropzone-looks">
-        <div class="look-chip">✨ Automatic Scene Match</div>
-        <div class="look-chip">⚡ Flash Party</div>
-        <div class="look-chip">🌙 Warm Night Focus</div>
-        <div class="look-chip">🪞 Mirror Selfie</div>
-        <div class="look-chip">🌀 Club Whip Swirl</div>
-        <div class="look-chip">☀️ Daylight Candid</div>
+  <!-- SCREEN 01: DROP & START -->
+  <main id="emptyState" class="empty-screen">
+    <div class="empty-center">
+      <div id="dropzone" class="dropzone-card">
+        <div class="dropzone-icon-tile">
+          <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" fill="none" stroke="#F5A623" stroke-width="2" stroke-linecap="round" />
+            <polyline points="17 8 12 3 7 8" fill="none" stroke="#F5A623" stroke-width="2" stroke-linecap="round" />
+            <line x1="12" y1="3" x2="12" y2="15" stroke="#F5A623" stroke-width="2" stroke-linecap="round" />
+          </svg>
+        </div>
+
+        <h1>Drop any photo to match its blur</h1>
+        <p class="dropzone-sub">
+          Auto-Match reads the scene, Vision AI traces faces and moving arms, and our optical engine delivers a believable iPhone shot in one pass.
+        </p>
+
+        <div class="dropzone-cta-row">
+          <label class="btn btn-amber btn-lg" for="fileInput">Choose Photo</label>
+          <span class="dropzone-note">JPG, PNG, or WebP &middot; Zero pixel regeneration</span>
+        </div>
+      </div>
+
+      <div class="promise-strip">
+        <div class="promise-step active">
+          <span class="promise-num">01</span>
+          <span class="promise-text">One-Shot Auto-Match</span>
+        </div>
+        <span class="promise-line"></span>
+        <div class="promise-step">
+          <span class="promise-num">02</span>
+          <span class="promise-text">Optional 1-Click Looks</span>
+        </div>
+        <span class="promise-line"></span>
+        <div class="promise-step">
+          <span class="promise-num">03</span>
+          <span class="promise-text">Fine-Tune Only If Needed</span>
+        </div>
       </div>
     </div>
+
+    <!-- Bottom Recent Strip (appears automatically as you edit photos in session) -->
+    <footer id="recentStrip" class="recent-bar hidden">
+      <div class="recent-inner">
+        <span class="recent-label">RECENT</span>
+        <div id="recentList" class="recent-list"></div>
+      </div>
+    </footer>
   </main>
 
-  <!-- TAB 1: 3-LAYER STUDIO (Clean Layer 1+2 by default; Layer 3 Fine-Tune drawer opens on demand) -->
-  <main id="tab-qa" class="workspace hidden">
-    <section class="qa-stage-col">
-      <!-- Slim Top Viewer Toolbar -->
-      <div class="viewer-toolbar">
-        <div class="toolbar-group">
-          <button id="modeSideBtn" class="seg-btn active" title="Compare Original vs Result side-by-side">Side-by-Side</button>
-          <button id="modeWipeBtn" class="seg-btn" title="Drag divider left and right">Wipe Slider</button>
-          <button id="zoomBtn" class="seg-btn" title="Inspect pixels 1:1 (Shortcut: Z)">100% Zoom</button>
-        </div>
-
-        <!-- Layer 1 Quick Controls (always visible, super clean!) -->
-        <div class="toolbar-group auto-bar-group">
-          <span id="autoBadge" class="auto-badge">✨ Auto-Match</span>
-          <label class="strength-wrap" title="Nudge overall blur intensity without touching individual sliders">
-            <span>Strength</span>
-            <input id="autoStrengthSlider" type="range" min="45" max="150" step="5" value="100" />
-            <span id="autoStrengthVal" class="strength-val">100%</span>
-          </label>
-          <button id="quickRerollBtn" class="btn btn-ghost btn-xxs" title="Try a different natural shake direction & pattern">
-            🎲 Vary
-          </button>
-          <button id="aiAutoPaintBtn" class="btn btn-ai btn-xxs" title="Use your connected Kie.ai / Gemini Vision AI to trace the face & moving arms automatically (zero pixel regeneration)">
-            ✨ AI Auto-Paint
-          </button>
-        </div>
-
-        <!-- Layer 3 Focus Brush (visible when Fine-Tune is open OR brush is active) -->
-        <div id="brushToolbarGroup" class="toolbar-group brush-group hidden">
-          <label class="ai-tune-check" title="Also let AI adjust slider amounts">
-            <input id="aiTuneSlidersCheck" type="checkbox" />
-            <span>+ Sliders</span>
-          </label>
-          <span class="toolbar-sep"></span>
-          <button class="brush-btn active" data-brush="off">Off</button>
-          <button class="brush-btn brush-sharp" data-brush="sharp" title="Paint green over face to protect it">Keep Sharp</button>
-          <button class="brush-btn brush-blur" data-brush="blur" title="Paint red over hands/arms to blur them">Make Blurry</button>
-          <input id="brushSizeInput" class="brush-size-slider" type="range" min="18" max="120" value="54" title="Brush size" />
-          <button id="toggleMaskBtn" class="btn btn-ghost btn-xxs active-ghost" title="Show or hide green/red mask overlay">Mask</button>
-          <button id="clearBrushBtn" class="btn btn-ghost btn-xxs" title="Clear painted mask">Clear</button>
-        </div>
-      </div>
-
-      <!-- Plain-English Auto Analysis / AI Note -->
-      <div id="noteBanner" class="note-banner hidden"></div>
-
-      <!-- Main Full-Height Photo Comparison Canvas -->
-      <div id="viewerStage" class="viewer-stage">
-        <!-- Side-by-Side View -->
-        <div id="sideBySideView" class="side-by-side">
-          <div class="pane">
-            <div class="pane-badge">Original</div>
-            <div class="pane-viewport" id="leftViewport">
-              <div class="image-stack" id="leftStack">
-                <img id="origImg" alt="Original photo" draggable="false" />
-                <canvas id="brushCanvas" class="brush-canvas"></canvas>
-              </div>
-            </div>
+  <!-- SCREENS 02 & 03: STUDIO (Layer 1+2 Default -> Layer 3 Fine-Tune On Demand) -->
+  <main id="tab-qa" class="studio-screen hidden">
+    <div class="studio-body">
+      <!-- Main Photo Stage Column -->
+      <section class="stage-column">
+        <!-- Floating View Switcher + Detection/Mask Pill -->
+        <div class="stage-utility-row">
+          <div class="segmented-pill">
+            <button id="modeSideBtn" class="seg-btn active" type="button" title="Compare Original vs Result side by side">Side-by-Side</button>
+            <button id="modeWipeBtn" class="seg-btn" type="button" title="Drag divider left and right">Wipe Slider</button>
+            <button id="zoomBtn" class="seg-btn" type="button" title="Inspect pixels 1:1 (Shortcut: Z)">100% Zoom</button>
           </div>
-          <div class="pane">
-            <div class="pane-badge" id="rightBadge">Result</div>
-            <div class="pane-viewport" id="rightViewport">
-              <div class="image-stack" id="rightStack">
-                <img id="stageImg" alt="Processed result" draggable="false" />
-                <canvas id="brushMirrorCanvas" class="brush-canvas readonly"></canvas>
-              </div>
-            </div>
+
+          <!-- Screen 02: Auto-Match Detection Pill -->
+          <div id="detectionPill" class="detection-pill">
+            <span class="amber-dot"></span>
+            <span id="detectionText">Auto-Match ready</span>
+          </div>
+
+          <!-- Screen 03: Mask Color Legend Pills -->
+          <div id="maskLegendPills" class="mask-legend hidden">
+            <span class="legend-pill legend-green">Green = Sharp Face</span>
+            <span class="legend-pill legend-red">Red = Moving Hands</span>
           </div>
         </div>
 
-        <!-- Before / After Wipe Slider View -->
-        <div id="wipeView" class="wipe-view hidden">
-          <div class="wipe-viewport" id="wipeViewport">
-            <div class="wipe-stack" id="wipeStack">
-              <img id="wipeAfterImg" class="wipe-img" alt="After" draggable="false" />
-              <div id="wipeClip" class="wipe-clip">
-                <img id="wipeBeforeImg" class="wipe-img" alt="Original" draggable="false" />
+        <!-- Comparison Stage -->
+        <div id="viewerStage" class="viewer-stage">
+          <!-- Side-by-Side View -->
+          <div id="sideBySideView" class="side-by-side">
+            <div class="stage-card stage-card-orig">
+              <div class="card-badge" id="leftBadge">Original</div>
+              <div class="pane-viewport" id="leftViewport">
+                <div class="image-stack" id="leftStack">
+                  <img id="origImg" alt="Original photo" draggable="false" />
+                  <canvas id="brushCanvas" class="brush-canvas"></canvas>
+                </div>
               </div>
-              <div id="wipeHandle" class="wipe-handle">
-                <div class="wipe-knob">↔</div>
+            </div>
+
+            <div class="stage-card stage-card-after">
+              <div class="card-badge card-badge-amber" id="rightBadgeWrap">
+                <span class="amber-dot"></span>
+                <span id="rightBadge">Auto-Match</span>
               </div>
-              <div class="pane-badge wipe-badge-left">Original</div>
-              <div class="pane-badge wipe-badge-right" id="wipeRightBadge">Result</div>
+              <div class="pane-viewport" id="rightViewport">
+                <div class="image-stack" id="rightStack">
+                  <img id="stageImg" alt="Processed result" draggable="false" />
+                  <canvas id="brushMirrorCanvas" class="brush-canvas readonly"></canvas>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Wipe Slider View -->
+          <div id="wipeView" class="wipe-view hidden">
+            <div class="stage-card stage-card-after wipe-card">
+              <div class="wipe-viewport" id="wipeViewport">
+                <div class="wipe-stack" id="wipeStack">
+                  <img id="wipeAfterImg" class="wipe-img" alt="After" draggable="false" />
+                  <div id="wipeClip" class="wipe-clip">
+                    <img id="wipeBeforeImg" class="wipe-img" alt="Original" draggable="false" />
+                  </div>
+                  <div id="wipeHandle" class="wipe-handle">
+                    <div class="wipe-knob">&#8596;</div>
+                  </div>
+                  <div class="card-badge wipe-badge-left">Original</div>
+                  <div class="card-badge card-badge-amber wipe-badge-right">
+                    <span class="amber-dot"></span>
+                    <span id="wipeRightBadge">Auto-Match</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Subtle Processing Pill -->
+          <div id="loadingOverlay" class="loading-pill hidden">
+            <div class="spinner"></div>
+            <span id="loadingText">Updating…</span>
+          </div>
+        </div>
+
+        <!-- Screen 03: Bottom 5-Stage QA Filmstrip (64px) -->
+        <div id="filmstripBar" class="filmstrip-bar hidden">
+          <div id="filmstrip" class="filmstrip"></div>
+        </div>
+      </section>
+
+      <!-- Screen 03: Right 332px Zero-Scroll Fine-Tune Inspector -->
+      <aside id="controlsPanel" class="inspector-panel hidden">
+        <!-- Section 1: AI Mask & Brush -->
+        <div class="inspector-section mask-section">
+          <div class="section-head">
+            <span class="section-eyebrow">AI MASK &amp; BRUSH</span>
+            <span id="maskStatusLabel" class="mask-status-label">Mask Hidden</span>
+          </div>
+
+          <div class="mask-action-row">
+            <button id="aiAutoPaintBtn" class="btn btn-amber-outline btn-grow" type="button" title="Trace face &amp; moving arms with Vision AI (zero pixel regeneration)">
+              AI Auto-Paint
+            </button>
+            <button id="toggleMaskBtn" class="btn btn-surface btn-compact" type="button" title="Show or hide green/red mask overlay">
+              Hide
+            </button>
+            <button id="clearBrushBtn" class="btn btn-surface btn-compact" type="button" title="Clear painted mask &amp; arm pivots">
+              Clear
+            </button>
+          </div>
+
+          <div class="brush-mode-row">
+            <button class="brush-mode-btn brush-sharp" data-brush="sharp" type="button" title="Click to toggle painting green over faces to protect">
+              Keep Sharp
+            </button>
+            <button class="brush-mode-btn brush-blur" data-brush="blur" type="button" title="Click to toggle painting red over moving hands/arms">
+              Make Blurry
+            </button>
+          </div>
+
+          <!-- Compact Brush Size Row (shown when actively painting) -->
+          <div id="brushSizeRow" class="brush-size-row hidden">
+            <span class="brush-size-lbl">Brush Size</span>
+            <input id="brushSizeInput" class="amber-range" type="range" min="18" max="120" value="54" />
+            <span id="brushSizeVal" class="mono-val">54</span>
+          </div>
+        </div>
+
+        <!-- Section 2: Zero-Scroll 5-Step Switcher + Active Stage Sliders -->
+        <div class="inspector-section step-section">
+          <div class="section-head">
+            <span class="section-eyebrow">EDIT STEP (ZERO SCROLL)</span>
+          </div>
+
+          <div class="step-tabs" role="tablist" aria-label="Pipeline stage">
+            <button class="step-tab" data-step="stage1" type="button">1 Focus</button>
+            <button class="step-tab active" data-step="stage2" type="button">2 Motion</button>
+            <button class="step-tab" data-step="stage3" type="button">3 Glow</button>
+            <button class="step-tab" data-step="stage4" type="button">4 Grain</button>
+            <button class="step-tab" data-step="stage5" type="button">5 IG</button>
+          </div>
+
+          <!-- Step 1: Missed Focus -->
+          <div class="step-pane hidden" data-step-pane="stage1">
+            <div class="step-header-row">
+              <h3>1 &middot; Missed Focus</h3>
+              <label class="amber-switch" title="Turn Missed Focus on or off">
+                <input type="checkbox" id="s1_enabled" checked />
+                <span class="amber-switch-track"></span>
+              </label>
+            </div>
+            <div class="step-fields" data-stage-card="stage1">
+              <div class="field">
+                <div class="field-label">
+                  <span>Focus Softness</span>
+                  <span class="mono-val" id="val_s1_radius">1.4</span>
+                </div>
+                <input type="range" class="amber-range" id="s1_radius" min="0" max="12" step="0.1" value="1.35" />
+              </div>
+              <div class="field">
+                <div class="field-label"><span>Focus Area</span></div>
+                <select id="s1_falloff_mode" class="dash-select">
+                  <option value="face_center">Keep Face Sharper</option>
+                  <option value="edges">Keep Center Sharper</option>
+                  <option value="uniform">Whole Photo Soft</option>
+                </select>
+              </div>
+              <div class="field" id="wrap_s1_falloff">
+                <div class="field-label">
+                  <span>Face Protection</span>
+                  <span class="mono-val" id="val_s1_falloff">72%</span>
+                </div>
+                <input type="range" class="amber-range" id="s1_falloff_strength" min="0" max="100" step="1" value="72" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Step 2: Motion & Flash -->
+          <div class="step-pane" data-step-pane="stage2">
+            <div class="step-header-row">
+              <h3>2 &middot; Motion &amp; Flash</h3>
+              <label class="amber-switch" title="Turn Motion &amp; Flash on or off">
+                <input type="checkbox" id="s2_enabled" checked />
+                <span class="amber-switch-track"></span>
+              </label>
+            </div>
+            <div class="step-fields" data-stage-card="stage2">
+              <div class="field">
+                <div class="field-label"><span>Motion Style</span></div>
+                <select id="s2_method" class="dash-select">
+                  <option value="flash_drag">Flash Party Drag</option>
+                  <option value="handheld_shake">Handheld Micro-Shake</option>
+                  <option value="camera_swirl">Club Whip-Pan Swirl</option>
+                  <option value="pivot_swing">Moving Hands Swing</option>
+                  <option value="cloud_ai">Cloud AI (Optional Key)</option>
+                </select>
+              </div>
+
+              <div class="field" id="wrap_s2_shake">
+                <div class="field-label">
+                  <span>Hand Shake</span>
+                  <span class="mono-val" id="val_s2_shake">10.0</span>
+                </div>
+                <input type="range" class="amber-range" id="s2_shake_amount" min="0" max="30" step="0.5" value="10" />
+              </div>
+
+              <div class="field" id="wrap_s2_ghost">
+                <div class="field-label">
+                  <span>Double-Image Ghosting</span>
+                  <span class="mono-val" id="val_s2_ghost">38%</span>
+                </div>
+                <input type="range" class="amber-range" id="s2_ghost_strength" min="0" max="100" step="1" value="38" />
+              </div>
+
+              <div class="field" id="wrap_s2_flash">
+                <div class="field-label">
+                  <span>Flash Sharpness</span>
+                  <span class="mono-val" id="val_s2_flash">74%</span>
+                </div>
+                <input type="range" class="amber-range" id="s2_flash_sharpness" min="35" max="92" step="1" value="74" />
+              </div>
+
+              <div class="field" id="wrap_s2_outer">
+                <div class="field-label">
+                  <span>Moving Arms Smear</span>
+                  <span class="mono-val" id="val_s2_outer">60%</span>
+                </div>
+                <input type="range" class="amber-range" id="s2_outer_smear" min="0" max="100" step="1" value="60" />
+              </div>
+
+              <div class="field hidden" id="wrap_s2_swing">
+                <div class="field-label">
+                  <span>Swirl / Swing Arc</span>
+                  <span class="mono-val" id="val_s2_swing">7.5°</span>
+                </div>
+                <input type="range" class="amber-range" id="s2_swing_angle" min="1.5" max="18" step="0.5" value="7.5" />
+              </div>
+
+              <div class="field hidden" id="wrap_s2_swing_int">
+                <div class="field-label">
+                  <span>Arm Swing Strength</span>
+                  <span class="mono-val" id="val_s2_swing_int">80%</span>
+                </div>
+                <input type="range" class="amber-range" id="s2_swing_intensity" min="0" max="100" step="1" value="80" />
+              </div>
+
+              <div class="field" id="wrap_s2_angle">
+                <div class="field-label">
+                  <span>Shake Direction</span>
+                  <span class="mono-val" id="val_s2_angle">18°</span>
+                </div>
+                <input type="range" class="amber-range" id="s2_direction_angle" min="-180" max="180" step="5" value="18" />
+              </div>
+
+              <button id="rerollShakeBtn" class="btn btn-surface btn-full" type="button">
+                New Natural Shake Pattern
+              </button>
+            </div>
+          </div>
+
+          <!-- Step 3: Dirty Lens Glow -->
+          <div class="step-pane hidden" data-step-pane="stage3">
+            <div class="step-header-row">
+              <h3>3 &middot; Dirty Lens Glow</h3>
+              <label class="amber-switch" title="Turn Dirty Lens Glow on or off">
+                <input type="checkbox" id="s3_enabled" checked />
+                <span class="amber-switch-track"></span>
+              </label>
+            </div>
+            <div class="step-fields" data-stage-card="stage3">
+              <div class="field">
+                <div class="field-label">
+                  <span>Dirty Lens Glow</span>
+                  <span class="mono-val" id="val_s3_glow">34%</span>
+                </div>
+                <input type="range" class="amber-range" id="s3_glow_amount" min="0" max="100" step="1" value="34" />
+              </div>
+              <div class="field">
+                <div class="field-label">
+                  <span>Hazy Night Shadows</span>
+                  <span class="mono-val" id="val_s3_haze">18%</span>
+                </div>
+                <input type="range" class="amber-range" id="s3_haze_lift" min="0" max="100" step="1" value="18" />
+              </div>
+              <div class="field">
+                <div class="field-label">
+                  <span>Warm Glow Tint</span>
+                  <span class="mono-val" id="val_s3_warmth">18%</span>
+                </div>
+                <input type="range" class="amber-range" id="s3_warmth" min="0" max="100" step="1" value="18" />
+              </div>
+              <div class="field">
+                <div class="field-label">
+                  <span>Edge Color Fringe</span>
+                  <span class="mono-val" id="val_s3_fringe">18%</span>
+                </div>
+                <input type="range" class="amber-range" id="s3_edge_fringing" min="0" max="100" step="1" value="18" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Step 4: Nighttime Grain -->
+          <div class="step-pane hidden" data-step-pane="stage4">
+            <div class="step-header-row">
+              <h3>4 &middot; Nighttime Grain</h3>
+              <label class="amber-switch" title="Turn Nighttime Grain on or off">
+                <input type="checkbox" id="s4_enabled" checked />
+                <span class="amber-switch-track"></span>
+              </label>
+            </div>
+            <div class="step-fields" data-stage-card="stage4">
+              <div class="field">
+                <div class="field-label">
+                  <span>Nighttime Grain</span>
+                  <span class="mono-val" id="val_s4_grain">32%</span>
+                </div>
+                <input type="range" class="amber-range" id="s4_grain_amount" min="0" max="100" step="1" value="32" />
+              </div>
+              <div class="field">
+                <div class="field-label">
+                  <span>Clumpy Phone Texture</span>
+                  <span class="mono-val" id="val_s4_clump">58%</span>
+                </div>
+                <input type="range" class="amber-range" id="s4_clumpiness" min="0" max="100" step="1" value="58" />
+              </div>
+              <div class="field">
+                <div class="field-label">
+                  <span>Phone Smoothness</span>
+                  <span class="mono-val" id="val_s4_smooth">34%</span>
+                </div>
+                <input type="range" class="amber-range" id="s4_isp_smoothing" min="0" max="100" step="1" value="34" />
+              </div>
+              <div class="field">
+                <div class="field-label">
+                  <span>Phone Digital Zoom</span>
+                  <span class="mono-val" id="val_s4_zoom">0%</span>
+                </div>
+                <input type="range" class="amber-range" id="s4_digital_zoom" min="0" max="100" step="1" value="0" />
+              </div>
+              <div class="field">
+                <div class="field-label">
+                  <span>3AM Streetlight Tone</span>
+                  <span class="mono-val" id="val_s4_cast">0%</span>
+                </div>
+                <input type="range" class="amber-range" id="s4_night_cast" min="0" max="100" step="1" value="0" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Step 5: Instagram Polish -->
+          <div class="step-pane hidden" data-step-pane="stage5">
+            <div class="step-header-row">
+              <h3>5 &middot; Instagram Polish</h3>
+              <label class="amber-switch" title="Turn Instagram Polish on or off">
+                <input type="checkbox" id="s5_enabled" checked />
+                <span class="amber-switch-track"></span>
+              </label>
+            </div>
+            <div class="step-fields" data-stage-card="stage5">
+              <div class="field">
+                <div class="field-label">
+                  <span>Instagram Softness</span>
+                  <span class="mono-val" id="val_s5_soft">18%</span>
+                </div>
+                <input type="range" class="amber-range" id="s5_insta_softness" min="0" max="100" step="1" value="18" />
+              </div>
+              <div class="field">
+                <div class="field-label">
+                  <span>Upload Quality</span>
+                  <span class="mono-val" id="val_s5_qual">83</span>
+                </div>
+                <input type="range" class="amber-range" id="s5_jpeg_quality" min="72" max="95" step="1" value="83" />
+              </div>
             </div>
           </div>
         </div>
 
-        <!-- Subtle Loading Pill -->
-        <div id="loadingOverlay" class="loading-pill hidden">
-          <div class="spinner"></div>
-          <span>Updating…</span>
-        </div>
-      </div>
-
-      <!-- Layer 3 Bottom 5-Stage QA Filmstrip (hidden in clean Layer 1/2 mode, shown in Fine-Tune!) -->
-      <div id="filmstripBar" class="filmstrip-bar hidden">
-        <div id="filmstrip" class="filmstrip"></div>
-      </div>
-    </section>
-
-    <!-- Layer 3 Collapsible Accordion Controls Sidebar (hidden until "Fine-Tune" is clicked!) -->
-    <aside id="controlsPanel" class="controls-panel hidden">
-      <div class="controls-top">
-        <div class="controls-title-row">
-          <h2 id="activeLookTitle">Auto-Match</h2>
-          <button id="expandAllBtn" class="btn-link" title="Expand or collapse all 5 stages">Show all</button>
-        </div>
-        <div class="controls-apply-row">
-          <button id="applyBtn" class="btn btn-primary btn-sm apply-btn">Apply</button>
-          <label class="auto-toggle">
+        <!-- Inspector Footer -->
+        <div class="inspector-foot">
+          <label class="amber-check">
             <input id="autoApplyCheck" type="checkbox" checked />
             <span>Auto-update</span>
           </label>
+          <button id="applyBtn" class="btn btn-amber" type="button">Apply</button>
+        </div>
+      </aside>
+    </div>
+
+    <!-- Screen 02: Clean 2-Row Bottom Studio Dock (Layer 1 + Layer 2; hidden in Fine-Tune Mode) -->
+    <footer id="studioDock" class="studio-dock">
+      <div class="dock-row dock-row-top">
+        <div class="strength-group">
+          <span class="dock-label">STRENGTH</span>
+          <span class="strength-end">Subtle</span>
+          <input id="autoStrengthSlider" class="amber-range strength-slider" type="range" min="45" max="150" step="5" value="100" />
+          <span class="strength-end">Bold</span>
+          <span id="autoStrengthVal" class="mono-val strength-readout">100%</span>
+        </div>
+
+        <div class="dock-actions">
+          <button id="quickRerollBtn" class="btn btn-surface" type="button" title="Try a different natural shake direction &amp; pattern">
+            <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true">
+              <polyline points="23 4 23 10 17 10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            </svg>
+            <span>Vary Shake</span>
+          </button>
+
+          <button id="dockAiMaskBtn" class="btn btn-surface" type="button" title="Re-run Vision AI to trace face &amp; moving arms">
+            <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true">
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" fill="none" stroke="#F5A623" stroke-width="2" stroke-linecap="round" />
+            </svg>
+            <span>Re-run AI Mask</span>
+          </button>
+
+          <button id="savePresetBtn" class="btn btn-ghost-outline" type="button" title="Save your current look as a custom preset">
+            + Save Preset
+          </button>
         </div>
       </div>
 
-      <div class="controls-accordion" id="controlsAccordion">
-        <!-- Stage 1 -->
-        <div class="acc-card" data-stage-card="stage1">
-          <div class="acc-head" data-acc-toggle="stage1">
-            <span class="stage-num">1</span>
-            <span class="stage-name">Missed Focus</span>
-            <span class="acc-chevron">▾</span>
-            <label class="switch" title="Turn Missed Focus on or off">
-              <input type="checkbox" id="s1_enabled" checked />
-              <span class="slider-switch"></span>
-            </label>
-          </div>
-          <div class="acc-body">
-            <div class="field">
-              <div class="field-label">
-                <span>Focus Softness</span>
-                <span class="field-val" id="val_s1_radius">1.4</span>
-              </div>
-              <input type="range" id="s1_radius" min="0" max="12" step="0.1" value="1.35" />
-            </div>
-            <div class="field">
-              <div class="field-label"><span>Focus Area</span></div>
-              <select id="s1_falloff_mode">
-                <option value="face_center">Keep Face Sharper</option>
-                <option value="edges">Keep Center Sharper</option>
-                <option value="uniform">Whole Photo Soft</option>
-              </select>
-            </div>
-            <div class="field" id="wrap_s1_falloff">
-              <div class="field-label">
-                <span>Face Protection</span>
-                <span class="field-val" id="val_s1_falloff">72%</span>
-              </div>
-              <input type="range" id="s1_falloff_strength" min="0" max="100" step="1" value="72" />
-            </div>
-          </div>
-        </div>
-
-        <!-- Stage 2 -->
-        <div class="acc-card open" data-stage-card="stage2">
-          <div class="acc-head" data-acc-toggle="stage2">
-            <span class="stage-num">2</span>
-            <span class="stage-name">Motion &amp; Flash</span>
-            <span class="acc-chevron">▾</span>
-            <label class="switch" title="Turn Motion & Flash on or off">
-              <input type="checkbox" id="s2_enabled" checked />
-              <span class="slider-switch"></span>
-            </label>
-          </div>
-          <div class="acc-body">
-            <div class="field">
-              <div class="field-label"><span>Motion Style</span></div>
-              <select id="s2_method">
-                <option value="flash_drag">Flash Party Drag</option>
-                <option value="handheld_shake">Handheld Micro-Shake</option>
-                <option value="camera_swirl">Club Whip-Pan Swirl</option>
-                <option value="pivot_swing">Moving Hands Swing</option>
-                <option value="cloud_ai">Cloud AI (Optional Key)</option>
-              </select>
-            </div>
-
-            <div class="field" id="wrap_s2_shake">
-              <div class="field-label">
-                <span>Hand Shake</span>
-                <span class="field-val" id="val_s2_shake">10</span>
-              </div>
-              <input type="range" id="s2_shake_amount" min="0" max="30" step="0.5" value="10" />
-            </div>
-
-            <div class="field" id="wrap_s2_ghost">
-              <div class="field-label">
-                <span>Double-Image Ghosting</span>
-                <span class="field-val" id="val_s2_ghost">38%</span>
-              </div>
-              <input type="range" id="s2_ghost_strength" min="0" max="100" step="1" value="38" />
-            </div>
-
-            <div class="field" id="wrap_s2_flash">
-              <div class="field-label">
-                <span>Flash Sharpness</span>
-                <span class="field-val" id="val_s2_flash">74%</span>
-              </div>
-              <input type="range" id="s2_flash_sharpness" min="35" max="92" step="1" value="74" />
-            </div>
-
-            <div class="field" id="wrap_s2_outer">
-              <div class="field-label">
-                <span>Moving Edges / Arms</span>
-                <span class="field-val" id="val_s2_outer">60%</span>
-              </div>
-              <input type="range" id="s2_outer_smear" min="0" max="100" step="1" value="60" />
-            </div>
-
-            <div class="field hidden" id="wrap_s2_swing">
-              <div class="field-label">
-                <span>Swirl / Swing Arc</span>
-                <span class="field-val" id="val_s2_swing">7.5°</span>
-              </div>
-              <input type="range" id="s2_swing_angle" min="1.5" max="18" step="0.5" value="7.5" />
-            </div>
-
-            <div class="field hidden" id="wrap_s2_swing_int">
-              <div class="field-label">
-                <span>Arm Swing Strength</span>
-                <span class="field-val" id="val_s2_swing_int">80%</span>
-              </div>
-              <input type="range" id="s2_swing_intensity" min="0" max="100" step="1" value="80" />
-            </div>
-
-            <div class="field" id="wrap_s2_angle">
-              <div class="field-label">
-                <span>Shake Direction</span>
-                <span class="field-val" id="val_s2_angle">18°</span>
-              </div>
-              <input type="range" id="s2_direction_angle" min="-180" max="180" step="5" value="18" />
-            </div>
-
-            <button id="rerollShakeBtn" class="btn btn-ghost btn-xxs btn-full">
-              🎲 New Natural Shake Pattern
-            </button>
-          </div>
-        </div>
-
-        <!-- Stage 3 -->
-        <div class="acc-card" data-stage-card="stage3">
-          <div class="acc-head" data-acc-toggle="stage3">
-            <span class="stage-num">3</span>
-            <span class="stage-name">Dirty Lens Glow</span>
-            <span class="acc-chevron">▾</span>
-            <label class="switch" title="Turn Dirty Lens Glow on or off">
-              <input type="checkbox" id="s3_enabled" checked />
-              <span class="slider-switch"></span>
-            </label>
-          </div>
-          <div class="acc-body">
-            <div class="field">
-              <div class="field-label">
-                <span>Dirty Lens Glow</span>
-                <span class="field-val" id="val_s3_glow">34%</span>
-              </div>
-              <input type="range" id="s3_glow_amount" min="0" max="100" step="1" value="34" />
-            </div>
-            <div class="field">
-              <div class="field-label">
-                <span>Hazy Night Shadows</span>
-                <span class="field-val" id="val_s3_haze">18%</span>
-              </div>
-              <input type="range" id="s3_haze_lift" min="0" max="100" step="1" value="18" />
-            </div>
-            <div class="field">
-              <div class="field-label">
-                <span>Warm Glow Tint</span>
-                <span class="field-val" id="val_s3_warmth">18%</span>
-              </div>
-              <input type="range" id="s3_warmth" min="0" max="100" step="1" value="18" />
-            </div>
-            <div class="field">
-              <div class="field-label">
-                <span>Edge Color Fringe</span>
-                <span class="field-val" id="val_s3_fringe">18%</span>
-              </div>
-              <input type="range" id="s3_edge_fringing" min="0" max="100" step="1" value="18" />
-            </div>
-          </div>
-        </div>
-
-        <!-- Stage 4 -->
-        <div class="acc-card" data-stage-card="stage4">
-          <div class="acc-head" data-acc-toggle="stage4">
-            <span class="stage-num">4</span>
-            <span class="stage-name">Nighttime Grain</span>
-            <span class="acc-chevron">▾</span>
-            <label class="switch" title="Turn Nighttime Grain on or off">
-              <input type="checkbox" id="s4_enabled" checked />
-              <span class="slider-switch"></span>
-            </label>
-          </div>
-          <div class="acc-body">
-            <div class="field">
-              <div class="field-label">
-                <span>Nighttime Grain</span>
-                <span class="field-val" id="val_s4_grain">32%</span>
-              </div>
-              <input type="range" id="s4_grain_amount" min="0" max="100" step="1" value="32" />
-            </div>
-            <div class="field">
-              <div class="field-label">
-                <span>Clumpy Phone Texture</span>
-                <span class="field-val" id="val_s4_clump">58%</span>
-              </div>
-              <input type="range" id="s4_clumpiness" min="0" max="100" step="1" value="58" />
-            </div>
-            <div class="field">
-              <div class="field-label">
-                <span>Phone Smoothness</span>
-                <span class="field-val" id="val_s4_smooth">34%</span>
-              </div>
-              <input type="range" id="s4_isp_smoothing" min="0" max="100" step="1" value="34" />
-            </div>
-            <div class="field">
-              <div class="field-label">
-                <span>Phone Digital Zoom</span>
-                <span class="field-val" id="val_s4_zoom">0%</span>
-              </div>
-              <input type="range" id="s4_digital_zoom" min="0" max="100" step="1" value="0" />
-            </div>
-            <div class="field">
-              <div class="field-label">
-                <span>3AM Streetlight Tone</span>
-                <span class="field-val" id="val_s4_cast">0%</span>
-              </div>
-              <input type="range" id="s4_night_cast" min="0" max="100" step="1" value="0" />
-            </div>
-          </div>
-        </div>
-
-        <!-- Stage 5 -->
-        <div class="acc-card" data-stage-card="stage5">
-          <div class="acc-head" data-acc-toggle="stage5">
-            <span class="stage-num">5</span>
-            <span class="stage-name">Instagram Polish</span>
-            <span class="acc-chevron">▾</span>
-            <label class="switch" title="Turn Instagram Polish on or off">
-              <input type="checkbox" id="s5_enabled" checked />
-              <span class="slider-switch"></span>
-            </label>
-          </div>
-          <div class="acc-body">
-            <div class="field">
-              <div class="field-label">
-                <span>Instagram Softness</span>
-                <span class="field-val" id="val_s5_soft">18%</span>
-              </div>
-              <input type="range" id="s5_insta_softness" min="0" max="100" step="1" value="18" />
-            </div>
-            <div class="field">
-              <div class="field-label">
-                <span>Upload Quality</span>
-                <span class="field-val" id="val_s5_qual">83</span>
-              </div>
-              <input type="range" id="s5_jpeg_quality" min="72" max="95" step="1" value="83" />
-            </div>
-          </div>
-        </div>
+      <div class="dock-row dock-row-looks">
+        <span class="dock-label">LOOKS</span>
+        <div id="presetList" class="looks-rail"></div>
       </div>
-
-      <div id="brushHint" class="brush-tip hidden">
-        Paint <strong>green</strong> to protect a face, or <strong>red</strong> to blur moving hands.
-      </div>
-    </aside>
+    </footer>
   </main>
 
-  <!-- TAB 2: OPTION SHOWDOWN -->
-  <main id="tab-showdown" class="showdown-workspace hidden">
-    <div class="showdown-bar">
-      <div class="showdown-bar-left">
-        <h2>Option Showdown</h2>
-        <span class="showdown-sub">Compare 3 styles next to your original and click Pick Winner.</span>
+  <!-- SCREEN 04: OPTION SHOWDOWN -->
+  <main id="tab-showdown" class="showdown-screen hidden">
+    <div class="showdown-toolbar">
+      <div class="compare-set-group">
+        <span class="dock-label-auto">COMPARE SET</span>
+        <div id="showdownSetTabs" class="set-pills">
+          <button class="set-pill active" data-set="night" type="button">Night &amp; Party</button>
+          <button class="set-pill" data-set="casual" type="button">Casual &amp; Mirror</button>
+          <button class="set-pill" data-set="lofi" type="button">3AM Lo-Fi</button>
+          <button class="set-pill" data-set="methods" type="button">Motion Styles</button>
+        </div>
       </div>
-      <div class="showdown-bar-right">
-        <select id="showdownModeSelect">
-          <option value="vibes">3 Influencer Vibes (Flash Party vs Club Swirl vs Warm Night)</option>
-          <option value="methods">3 Motion Styles (Handheld Shake vs Flash Drag vs Arm Swing)</option>
-          <option value="casual">3 Casual Looks (Mirror Selfie vs Daylight Candid vs Moving Hands)</option>
-        </select>
-        <button id="showdownZoomBtn" class="seg-btn">100% Zoom</button>
-        <button id="runShowdownBtn" class="btn btn-primary btn-sm">Run Showdown</button>
+
+      <div class="showdown-actions">
+        <button id="showdownZoomBtn" class="btn btn-subtle" type="button">Synced 100% Zoom</button>
+        <button id="runShowdownBtn" class="btn btn-surface" type="button">Re-run 3 Looks</button>
       </div>
     </div>
 
@@ -467,44 +585,44 @@
   <div id="presetModal" class="modal hidden">
     <div class="modal-card">
       <div class="modal-head">
-        <h3>Save My Custom Preset</h3>
-        <button class="modal-close" data-close-modal="presetModal">✕</button>
+        <h3>Save Custom Preset</h3>
+        <button class="modal-close" type="button" data-close-modal="presetModal">&times;</button>
       </div>
       <div class="modal-body">
         <div class="field">
           <label class="field-label" for="presetNameInput">Preset Name</label>
-          <input id="presetNameInput" type="text" placeholder="e.g. Rooftop Flash Look" />
+          <input id="presetNameInput" class="dash-input" type="text" placeholder="e.g. Rooftop Flash Look" />
         </div>
         <div class="field">
           <label class="field-label" for="presetDescInput">Short Note (optional)</label>
-          <input id="presetDescInput" type="text" placeholder="e.g. Crisp face with soft moving hands" />
+          <input id="presetDescInput" class="dash-input" type="text" placeholder="e.g. Crisp face with soft moving hands" />
         </div>
       </div>
       <div class="modal-foot">
-        <button class="btn btn-ghost btn-sm" data-close-modal="presetModal">Cancel</button>
-        <button id="confirmSavePresetBtn" class="btn btn-primary btn-sm">Save Preset</button>
+        <button class="btn btn-ghost-outline" type="button" data-close-modal="presetModal">Cancel</button>
+        <button id="confirmSavePresetBtn" class="btn btn-amber" type="button">Save Preset</button>
       </div>
     </div>
   </div>
 
-  <!-- AI Director & Optional Cloud Settings Drawer -->
+  <!-- AI Director & Optional Cloud Settings Modal -->
   <div id="settingsModal" class="modal hidden">
     <div class="modal-card modal-wide">
       <div class="modal-head">
         <h3>AI Director &amp; API Settings</h3>
-        <button class="modal-close" data-close-modal="settingsModal">✕</button>
+        <button class="modal-close" type="button" data-close-modal="settingsModal">&times;</button>
       </div>
       <div class="modal-body">
-        <div class="settings-section-title">✨ AI Auto-Paint (Vision Director)</div>
+        <div class="settings-section-title">AI Auto-Paint (Vision Director)</div>
         <p class="settings-reassure">
-          Never regenerates or alters a single pixel — your Vision AI only inspects the photo,
+          Never regenerates or alters a single pixel &mdash; your Vision AI only inspects the photo,
           paints the green/red Focus Brush around the real face &amp; moving arms, and sets exact arm-swing pivots.
         </p>
 
         <div class="field-row-2">
           <div class="field">
             <label class="field-label" for="visionProviderSelect">AI Provider</label>
-            <select id="visionProviderSelect">
+            <select id="visionProviderSelect" class="dash-select">
               <option value="kie">Kie.ai (Default)</option>
               <option value="gemini">Google Gemini</option>
               <option value="openai">OpenAI</option>
@@ -513,7 +631,7 @@
           </div>
           <div class="field">
             <label class="field-label" for="visionKeyInput">API Key</label>
-            <input id="visionKeyInput" type="password" placeholder="Paste your API key" />
+            <input id="visionKeyInput" class="dash-input" type="password" placeholder="Paste your API key" />
           </div>
         </div>
         <div id="visionKeyStatus" class="field-hint"></div>
@@ -521,19 +639,24 @@
         <div class="field">
           <div class="field-label">
             <label for="visionModelSelect">Vision Model</label>
-            <button id="fetchModelsBtn" class="btn-link" type="button">↻ Fetch Live Models</button>
+            <button id="fetchModelsBtn" class="btn-link" type="button">&#8635; Fetch Live Models</button>
           </div>
-          <select id="visionModelSelect"></select>
+          <select id="visionModelSelect" class="dash-select"></select>
         </div>
 
         <div class="field">
           <label class="field-label" for="visionCustomModelInput">Or Type Any Exact Model ID (optional)</label>
-          <input id="visionCustomModelInput" type="text" placeholder="Leave blank to use dropdown above (e.g. gemini-4-neon)" />
+          <input id="visionCustomModelInput" class="dash-input" type="text" placeholder="Leave blank to use dropdown above" />
         </div>
 
-        <label class="auto-vision-check">
+        <label class="amber-check settings-check">
           <input id="autoRunVisionCheck" type="checkbox" checked />
-          <span>Automatically run AI Auto-Paint on every uploaded photo (uses your API key)</span>
+          <span>Automatically run AI Auto-Paint on every uploaded photo</span>
+        </label>
+
+        <label class="amber-check settings-check">
+          <input id="aiTuneSlidersCheck" type="checkbox" />
+          <span>Also let AI Auto-Paint adjust slider values when run manually</span>
         </label>
 
         <details class="optional-details">
@@ -541,26 +664,26 @@
           <div class="optional-details-body">
             <div class="field">
               <label class="field-label" for="cloudProviderSelect">Cloud Service</label>
-              <select id="cloudProviderSelect">
+              <select id="cloudProviderSelect" class="dash-select">
                 <option value="fal">fal.ai</option>
                 <option value="replicate">Replicate</option>
               </select>
             </div>
             <div class="field">
               <label class="field-label" for="cloudKeyInput">API Key</label>
-              <input id="cloudKeyInput" type="password" placeholder="Leave blank to stay 100% local" />
+              <input id="cloudKeyInput" class="dash-input" type="password" placeholder="Leave blank to stay 100% local" />
               <div id="cloudKeyStatus" class="field-hint"></div>
             </div>
             <div class="field">
               <label class="field-label" for="cloudModelInput">Model Name (optional)</label>
-              <input id="cloudModelInput" type="text" placeholder="Default model used if blank" />
+              <input id="cloudModelInput" class="dash-input" type="text" placeholder="Default model used if blank" />
             </div>
           </div>
         </details>
       </div>
       <div class="modal-foot">
-        <button class="btn btn-ghost btn-sm" data-close-modal="settingsModal">Close</button>
-        <button id="saveSettingsBtn" class="btn btn-primary btn-sm">Save Settings</button>
+        <button class="btn btn-ghost-outline" type="button" data-close-modal="settingsModal">Close</button>
+        <button id="saveSettingsBtn" class="btn btn-amber" type="button">Save Settings</button>
       </div>
     </div>
   </div>
@@ -568,6 +691,6 @@
   <!-- Toast Notification -->
   <div id="toast" class="toast hidden"></div>
 
-  <script src="/static/app.js?v=7"></script>
+  <script src="/static/app.js?v=8"></script>
 </body>
 </html>

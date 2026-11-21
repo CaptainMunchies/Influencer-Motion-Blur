@@ -1,12 +1,12 @@
-/* Influencer Blur Lab — 3-Layer Studio (Layer 1 Auto-Match -> Layer 2 Presets -> Layer 3 Fine-Tune) */
+/* Influencer Blur Lab — Matte Vehicle Dashboard Studio (Screens 01–04) */
 
 const STAGE_META = [
   { key: "original", label: "Original", shortLabel: "Original", toggleField: null },
-  { key: "stage1", label: "1. Missed Focus", shortLabel: "1. Focus", toggleField: "s1_enabled" },
-  { key: "stage2", label: "2. Motion & Flash", shortLabel: "2. Motion", toggleField: "s2_enabled" },
-  { key: "stage3", label: "3. Dirty Lens Glow", shortLabel: "3. Glow", toggleField: "s3_enabled" },
-  { key: "stage4", label: "4. Nighttime Grain", shortLabel: "4. Grain", toggleField: "s4_enabled" },
-  { key: "stage5", label: "5. Final Result", shortLabel: "5. Final", toggleField: "s5_enabled" },
+  { key: "stage1", label: "1 · Missed Focus", shortLabel: "1. Focus", toggleField: "s1_enabled" },
+  { key: "stage2", label: "2 · Motion & Flash", shortLabel: "2. Motion", toggleField: "s2_enabled" },
+  { key: "stage3", label: "3 · Dirty Lens Glow", shortLabel: "3. Glow", toggleField: "s3_enabled" },
+  { key: "stage4", label: "4 · Nighttime Grain", shortLabel: "4. Grain", toggleField: "s4_enabled" },
+  { key: "stage5", label: "5 · Final Result", shortLabel: "5. Final", toggleField: "s5_enabled" },
 ];
 
 const SHORT_PRESET_NAMES = {
@@ -20,18 +20,28 @@ const SHORT_PRESET_NAMES = {
   lofi_streetlight_blur: "Lo-Fi Night",
 };
 
+const PROVIDER_LABELS = {
+  kie: "Kie.ai Vision Ready",
+  gemini: "Gemini Vision Ready",
+  openai: "OpenAI Vision Ready",
+  openrouter: "OpenRouter Vision Ready",
+};
+
 const state = {
   activeTab: "qa",
-  advancedOpen: false, // Layer 3 collapsed by default -> ultra-clean Layer 1+2 experience!
-  autoMode: true,      // Layer 1 Auto-Match active by default!
+  showingHome: true,
+  advancedOpen: false,
+  activeInspectorStep: "stage2",
+  autoMode: true,
   autoStrength: 1.0,
   autoSeedOffset: 0,
   autoAnalysis: null,
-  // ON by default: automatically uses AI Auto-Paint on every uploaded photo whenever an API key is saved
   autoRunVision: localStorage.getItem("ibl_auto_vision") !== "0",
   imageId: null,
   originalUrl: "",
   filename: "",
+  fullWidth: 0,
+  fullHeight: 0,
   previewWidth: 0,
   previewHeight: 0,
   subjectCenter: [0.50, 0.34],
@@ -43,23 +53,26 @@ const state = {
   viewMode: "side",
   wipePct: 50,
   zoomed: false,
+  showdownSet: "night",
   showdownZoomed: false,
-  allExpanded: false,
+  showdownResults: null,
+  selectedShowdownIdx: 0,
   brushMode: "off",
   brushHasStrokes: false,
-  showMaskOverlay: true,
+  showMaskOverlay: false,
   isPainting: false,
   isProcessing: false,
+  lastTimingText: "",
   debounceTimer: null,
   strengthTimer: null,
-  showdownResults: null,
   suggestedModels: {},
   visionHasKey: false,
+  visionProvider: "kie",
 };
 
 const $ = (id) => document.getElementById(id);
 
-function showToast(msg, duration = 2400) {
+function showToast(msg, duration = 2600) {
   const el = $("toast");
   el.textContent = msg;
   el.classList.remove("hidden");
@@ -67,28 +80,216 @@ function showToast(msg, duration = 2400) {
   el._t = setTimeout(() => el.classList.add("hidden"), duration);
 }
 
-function setStatus(text, show = true) {
-  const pill = $("statusPill");
-  pill.textContent = text;
-  pill.classList.toggle("hidden", !show);
-}
-
 function deepClone(obj) {
   return JSON.parse(JSON.stringify(obj));
 }
 
-// ---------- Layer 3 Fine-Tune Drawer Toggle ----------
+function updateSliderFill(el) {
+  if (!el) return;
+  const min = parseFloat(el.min || "0");
+  const max = parseFloat(el.max || "100");
+  const val = parseFloat(el.value || "0");
+  const pct = max > min ? ((val - min) / (max - min)) * 100 : 0;
+  el.style.setProperty("--pct", `${Math.max(0, Math.min(100, pct))}%`);
+}
+
+function updateAllSliderFills() {
+  document.querySelectorAll('input[type="range"].amber-range').forEach(updateSliderFill);
+}
+
+function setStatus(text) {
+  if (text) state.lastTimingText = text;
+  const statusEl = $("statusText");
+  if (!statusEl) return;
+  if (state.activeTab === "qa" && state.advancedOpen && !state.isProcessing) {
+    statusEl.textContent = state.lastTimingText ? `Fine-Tune · ${state.lastTimingText}` : "Fine-Tune Mode";
+  } else {
+    statusEl.textContent = text || state.lastTimingText || "Ready";
+  }
+}
+
+function setDetectionPill(text, tooltip = "") {
+  $("detectionText").textContent = text;
+  $("detectionPill").title = tooltip || text;
+}
+
+// ---------- Top Bar & Screen Routing ----------
+function updateTopbarMode() {
+  const hasPhoto = Boolean(state.imageId) && !state.showingHome;
+  const isShowdown = hasPhoto && state.activeTab === "showdown";
+  const isStudio = hasPhoto && state.activeTab === "qa";
+
+  $("visionReadyPill").classList.toggle("hidden", hasPhoto);
+  $("fileMetaBar").classList.toggle("hidden", !hasPhoto);
+  $("newPhotoBtn").classList.toggle("hidden", !hasPhoto);
+  $("toggleAdvancedBtn").classList.toggle("hidden", !isStudio);
+  $("downloadBtn").classList.toggle("hidden", !hasPhoto);
+  $("downloadBtn").disabled = !hasPhoto;
+
+  if (hasPhoto) {
+    $("fileNameLabel").textContent = state.filename || "photo.jpg";
+    $("downloadBtn").textContent = isShowdown ? "Export Winner" : "Export Full-Res";
+  }
+
+  $("toggleAdvancedBtn").classList.toggle("active", state.advancedOpen);
+  $("toggleAdvancedLabel").textContent = state.advancedOpen ? "Close Fine-Tune" : "Fine-Tune";
+
+  document.querySelectorAll(".tab-btn").forEach((b) => {
+    const isAct = hasPhoto ? b.dataset.tab === state.activeTab : b.dataset.tab === "qa";
+    b.classList.toggle("active", isAct);
+    b.setAttribute("aria-selected", String(isAct));
+  });
+}
+
+function showHomeScreen() {
+  state.showingHome = true;
+  $("emptyState").classList.remove("hidden");
+  $("tab-qa").classList.add("hidden");
+  $("tab-showdown").classList.add("hidden");
+  updateTopbarMode();
+  loadRecentPhotos();
+}
+
+function switchTab(tab) {
+  state.activeTab = tab;
+  if (!state.imageId) {
+    showHomeScreen();
+    if (tab === "showdown") showToast("Drop a photo first to compare looks in Showdown.");
+    return;
+  }
+
+  state.showingHome = false;
+  $("emptyState").classList.add("hidden");
+  $("tab-qa").classList.toggle("hidden", tab !== "qa");
+  $("tab-showdown").classList.toggle("hidden", tab !== "showdown");
+  updateTopbarMode();
+
+  if (tab === "qa") {
+    setStatus(state.lastTimingText || "Ready");
+    requestAnimationFrame(() => fitStageImages());
+  } else if (tab === "showdown") {
+    runShowdown();
+  }
+}
+
+// ---------- Screen 01: Vision Status & Recent Photos ----------
+async function refreshVisionPill() {
+  try {
+    const resp = await fetch("/api/settings");
+    const data = await resp.json();
+    state.visionHasKey = Boolean(data.vision_has_api_key);
+    state.visionProvider = data.vision_provider || "kie";
+    state.suggestedModels = data.suggested_models || {};
+
+    const pill = $("visionReadyPill");
+    const label = $("visionReadyLabel");
+    if (state.visionHasKey) {
+      pill.classList.remove("local-only");
+      label.textContent = PROVIDER_LABELS[state.visionProvider] || "Vision AI Ready";
+    } else {
+      pill.classList.add("local-only");
+      label.textContent = "Local Engine Ready";
+    }
+  } catch (_) {
+    // Keep default label
+  }
+}
+
+async function loadRecentPhotos() {
+  try {
+    const resp = await fetch("/api/recent");
+    const data = await resp.json();
+    const list = data.recent || [];
+    const bar = $("recentStrip");
+    const container = $("recentList");
+    if (!list.length) {
+      bar.classList.add("hidden");
+      container.innerHTML = "";
+      return;
+    }
+
+    bar.classList.remove("hidden");
+    container.innerHTML = "";
+    for (const item of list) {
+      const card = document.createElement("button");
+      card.type = "button";
+      card.className = "recent-card";
+      const sec = item.last_ms ? `${(item.last_ms / 1000).toFixed(1)}s` : "ready";
+      const cleanName = (item.filename || "photo.jpg").replace(/\.[^/.]+$/, "");
+      card.innerHTML = `
+        <img class="recent-thumb" src="${item.thumb_url}" alt="${cleanName}" />
+        <div class="recent-meta">
+          <div class="recent-name"></div>
+          <div class="recent-sub"></div>
+        </div>
+      `;
+      card.querySelector(".recent-name").textContent = cleanName;
+      card.querySelector(".recent-sub").textContent = `${item.last_look || "Auto-Match"} · ${sec}`;
+      card.addEventListener("click", () => reopenRecentPhoto(item.image_id));
+      container.appendChild(card);
+    }
+  } catch (_) {
+    // Non-critical
+  }
+}
+
+async function reopenRecentPhoto(imageId) {
+  try {
+    const resp = await fetch(`/api/photos/${encodeURIComponent(imageId)}`);
+    if (!resp.ok) {
+      showToast("That session expired — drop the photo again.");
+      loadRecentPhotos();
+      return;
+    }
+    const data = await resp.json();
+    await loadPhotoIntoStudio(data, false);
+  } catch (err) {
+    showToast(err.message || "Could not reopen photo.");
+  }
+}
+
+// ---------- Screen 03: Fine-Tune Drawer & Zero-Scroll Step Tabs ----------
+function selectInspectorStep(stepKey) {
+  const valid = ["stage1", "stage2", "stage3", "stage4", "stage5"];
+  const key = valid.includes(stepKey) ? stepKey : "stage2";
+  state.activeInspectorStep = key;
+
+  document.querySelectorAll(".step-tab").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.step === key);
+  });
+  document.querySelectorAll(".step-pane").forEach((pane) => {
+    pane.classList.toggle("hidden", pane.dataset.stepPane !== key);
+  });
+}
+
 function setAdvancedOpen(open) {
   state.advancedOpen = Boolean(open);
   $("tab-qa").classList.toggle("advanced-open", state.advancedOpen);
   $("controlsPanel").classList.toggle("hidden", !state.advancedOpen);
   $("filmstripBar").classList.toggle("hidden", !state.advancedOpen);
-  $("brushToolbarGroup").classList.toggle("hidden", !state.advancedOpen);
-  $("toggleAdvancedBtn").classList.toggle("active-ghost", state.advancedOpen);
-  $("toggleAdvancedBtn").textContent = state.advancedOpen ? "✕ Close Fine-Tune" : "🎛️ Fine-Tune";
-  if (!state.advancedOpen && state.brushMode !== "off") {
-    setBrushMode("off");
+  $("studioDock").classList.toggle("hidden", state.advancedOpen);
+  $("detectionPill").classList.toggle("hidden", state.advancedOpen);
+  $("maskLegendPills").classList.toggle("hidden", !state.advancedOpen);
+
+  if (state.advancedOpen) {
+    // Automatically reveal existing AI mask when entering Fine-Tune so user sees what's protected
+    if (state.brushHasStrokes) {
+      setMaskVisibility(true);
+    }
+    selectInspectorStep(state.selectedStage === "original" ? state.activeInspectorStep : state.selectedStage);
+  } else {
+    if (state.brushMode !== "off") setBrushMode("off");
+    setMaskVisibility(false);
+    // Return to Final Result view when leaving Fine-Tune
+    if (state.selectedStage !== "stage5") {
+      state.selectedStage = "stage5";
+      updateViewerImages();
+    }
   }
+
+  updateTopbarMode();
+  setStatus(state.lastTimingText);
+  updateLeftBadge();
   requestAnimationFrame(() => fitStageImages());
 }
 
@@ -117,10 +318,10 @@ function fitStageImages() {
   };
 
   if (state.viewMode === "side") {
-    sizeStack($("leftViewport"), $("leftStack"), 12);
-    sizeStack($("rightViewport"), $("rightStack"), 12);
+    sizeStack($("leftViewport"), $("leftStack"), 8);
+    sizeStack($("rightViewport"), $("rightStack"), 8);
   } else {
-    sizeStack($("wipeViewport"), $("wipeStack"), 16);
+    sizeStack($("wipeViewport"), $("wipeStack"), 10);
     syncWipeInnerDimensions();
   }
 }
@@ -141,44 +342,7 @@ function syncWipeInnerDimensions() {
   handle.style.left = `${state.wipePct}%`;
 }
 
-// ---------- Accordion Sidebar ----------
-function openAccordionStage(stageKey) {
-  if (state.allExpanded) return;
-  const target = stageKey === "original" ? "stage2" : stageKey;
-  document.querySelectorAll(".acc-card").forEach((card) => {
-    card.classList.toggle("open", card.dataset.stageCard === target);
-  });
-}
-
-function setupAccordion() {
-  document.querySelectorAll(".acc-head").forEach((head) => {
-    head.addEventListener("click", (e) => {
-      if (e.target.closest(".switch")) return;
-      const card = head.closest(".acc-card");
-      if (state.allExpanded) {
-        card.classList.toggle("open");
-        return;
-      }
-      const wasOpen = card.classList.contains("open");
-      document.querySelectorAll(".acc-card").forEach((c) => c.classList.remove("open"));
-      if (!wasOpen) card.classList.add("open");
-    });
-  });
-
-  $("expandAllBtn").addEventListener("click", () => {
-    state.allExpanded = !state.allExpanded;
-    $("expandAllBtn").textContent = state.allExpanded ? "Compact" : "Show all";
-    document.querySelectorAll(".acc-card").forEach((card) => {
-      if (state.allExpanded) {
-        card.classList.add("open");
-      } else {
-        card.classList.toggle("open", card.dataset.stageCard === (state.selectedStage === "original" ? "stage2" : state.selectedStage));
-      }
-    });
-  });
-}
-
-// ---------- Presets (Layer 1 Auto-Match + Layer 2 Quick Looks) ----------
+// ---------- Presets (Layer 1 Auto-Match + Layer 2 Looks Rail) ----------
 async function loadPresets() {
   const resp = await fetch("/api/presets");
   const data = await resp.json();
@@ -199,25 +363,23 @@ function renderPresetBar() {
   const container = $("presetList");
   container.innerHTML = "";
 
-  // Layer 1 primary button: ✨ Auto-Match
   const autoBtn = document.createElement("button");
-  autoBtn.className = "preset-pill auto-pill" + (state.activePresetId === "auto" ? " active" : "");
+  autoBtn.type = "button";
+  autoBtn.className = "look-pill" + (state.activePresetId === "auto" ? " active" : "");
   autoBtn.title = "Automatically analyzes your photo and applies the best matching candid phone blur";
-  autoBtn.textContent = "✨ Auto-Match";
+  autoBtn.textContent = "Auto-Match";
   autoBtn.addEventListener("click", () => {
     state.autoMode = true;
     state.activePresetId = "auto";
     renderPresetBar();
-    if (state.imageId) {
-      runAutoMatch(false);
-    }
+    if (state.imageId) runAutoMatch(false);
   });
   container.appendChild(autoBtn);
 
-  // Layer 2 optional 1-click presets
   for (const p of allPresets()) {
     const btn = document.createElement("button");
-    btn.className = "preset-pill" + (state.activePresetId === p.id ? " active" : "");
+    btn.type = "button";
+    btn.className = "look-pill" + (state.activePresetId === p.id ? " active" : "");
     btn.title = p.description || p.name;
 
     const span = document.createElement("span");
@@ -227,7 +389,7 @@ function renderPresetBar() {
     if (!p.builtin) {
       const del = document.createElement("span");
       del.className = "preset-del";
-      del.textContent = "✕";
+      del.textContent = "×";
       del.title = "Delete saved preset";
       del.addEventListener("click", async (e) => {
         e.stopPropagation();
@@ -260,14 +422,12 @@ function applyPresetToState(preset, triggerProcess = true) {
   state.autoMode = false;
   state.activePresetId = preset.id;
   const scaled = scaleConfigByStrength(preset.config, state.autoStrength);
-  // Keep detected subject center so even manual presets protect off-center faces automatically!
   scaled.stage1_focus.focus_center_x = state.subjectCenter[0];
   scaled.stage1_focus.focus_center_y = state.subjectCenter[1];
   state.config = scaled;
 
-  $("activeLookTitle").textContent = preset.name;
-  $("autoBadge").textContent = `Look: ${SHORT_PRESET_NAMES[preset.id] || preset.name}`;
-  $("noteBanner").classList.add("hidden");
+  const shortName = SHORT_PRESET_NAMES[preset.id] || preset.name;
+  setDetectionPill(`Look: ${shortName} · ${preset.description || "Custom optical profile"}`, preset.description || preset.name);
   syncControlsFromConfig();
   renderPresetBar();
   if (triggerProcess && state.imageId) {
@@ -275,7 +435,7 @@ function applyPresetToState(preset, triggerProcess = true) {
   }
 }
 
-// ---------- Sync Config <-> Controls ----------
+// ---------- Sync Config <-> Inspector Controls ----------
 function syncControlsFromConfig() {
   const c = state.config;
   if (!c) return;
@@ -398,9 +558,11 @@ function updateControlReadoutsAndVisibility() {
     ["stage5", "s5_enabled"],
   ];
   for (const [cardKey, inputId] of toggles) {
-    const card = document.querySelector(`[data-stage-card="${cardKey}"]`);
-    if (card) card.classList.toggle("disabled", !$(inputId).checked);
+    const wrap = document.querySelector(`[data-stage-card="${cardKey}"]`);
+    if (wrap) wrap.classList.toggle("disabled", !$(inputId).checked);
   }
+
+  updateAllSliderFills();
 }
 
 function scheduleAutoProcess() {
@@ -410,10 +572,48 @@ function scheduleAutoProcess() {
   clearTimeout(state.debounceTimer);
   state.debounceTimer = setTimeout(() => {
     processCurrentPhoto();
-  }, 340);
+  }, 320);
 }
 
-// ---------- Upload (Always One-Shot Auto-Match + Auto AI Auto-Paint!) ----------
+// ---------- Upload & Photo Session Loading ----------
+async function loadPhotoIntoStudio(data, runVisionCheck = true) {
+  state.imageId = data.image_id;
+  state.originalUrl = data.original_url;
+  state.filename = data.filename || "photo.jpg";
+  state.fullWidth = data.full_width || data.preview_width || 0;
+  state.fullHeight = data.full_height || data.preview_height || 0;
+  state.previewWidth = data.preview_width;
+  state.previewHeight = data.preview_height;
+  state.subjectCenter = data.subject_center || [0.50, 0.34];
+  state.autoSeedOffset = 0;
+  state.autoMode = true;
+  state.activePresetId = "auto";
+  state.selectedStage = "stage5";
+  state.showingHome = false;
+
+  renderPresetBar();
+
+  state.stages = { original: data.original_url, stage5: data.original_url };
+  $("origImg").src = data.original_url;
+  $("wipeBeforeImg").src = data.original_url;
+  $("stageImg").src = data.original_url;
+  $("wipeAfterImg").src = data.original_url;
+
+  initBrushCanvases(data.preview_width, data.preview_height);
+  setMaskVisibility(state.advancedOpen);
+
+  switchTab(state.activeTab === "showdown" ? "qa" : state.activeTab);
+  requestAnimationFrame(() => fitStageImages());
+
+  let shouldUseVision = false;
+  if (runVisionCheck) {
+    await refreshVisionPill();
+    shouldUseVision = state.autoRunVision && state.visionHasKey;
+  }
+
+  await runAutoMatch(shouldUseVision);
+}
+
 async function uploadFile(file) {
   if (!file) return;
   const form = new FormData();
@@ -427,43 +627,10 @@ async function uploadFile(file) {
       throw new Error(err.detail || "Upload failed");
     }
     const data = await resp.json();
-    state.imageId = data.image_id;
-    state.originalUrl = data.original_url;
-    state.filename = data.filename;
-    state.previewWidth = data.preview_width;
-    state.previewHeight = data.preview_height;
-    state.subjectCenter = data.subject_center || [0.50, 0.34];
-    state.autoSeedOffset = 0;
-
-    // Always start every new upload in clean Layer-1 Auto-Match mode
-    state.autoMode = true;
-    state.activePresetId = "auto";
-    state.selectedStage = "stage5";
-    renderPresetBar();
-
-    // Immediately show Original photo on screen so user never stares at a blank screen
-    state.stages = { original: data.original_url, stage5: data.original_url };
-    $("origImg").src = data.original_url;
-    $("wipeBeforeImg").src = data.original_url;
-    $("stageImg").src = data.original_url;
-    $("wipeAfterImg").src = data.original_url;
-
-    initBrushCanvases(data.preview_width, data.preview_height);
-    $("emptyState").classList.add("hidden");
-    $("downloadBtn").disabled = false;
-    switchTab(state.activeTab);
-    requestAnimationFrame(() => fitStageImages());
-
-    // Check live whether a Vision AI key (e.g. Kie.ai) is configured so one-shot upload uses it automatically!
-    const sResp = await fetch("/api/settings");
-    const sData = await sResp.json().catch(() => ({}));
-    state.visionHasKey = Boolean(sData.vision_has_api_key);
-    const shouldUseVision = state.autoRunVision && state.visionHasKey;
-
-    await runAutoMatch(shouldUseVision);
+    await loadPhotoIntoStudio(data, true);
   } catch (err) {
     setStatus("Upload error");
-    showToast(err.message);
+    showToast(err.message || "Could not upload photo.");
   }
 }
 
@@ -471,8 +638,7 @@ async function uploadFile(file) {
 async function runAutoMatch(useVisionAI = false) {
   if (!state.imageId) return;
   state.isProcessing = true;
-  const loadText = $("loadingOverlay").querySelector("span");
-  if (loadText) loadText.textContent = useVisionAI ? "✨ AI tracing face & arms…" : "Auto-matching…";
+  $("loadingText").textContent = useVisionAI ? "Vision AI tracing face & arms…" : "Auto-matching scene…";
   $("loadingOverlay").classList.remove("hidden");
   setStatus(useVisionAI ? "AI Matching…" : "Auto-Matching…");
 
@@ -489,9 +655,7 @@ async function runAutoMatch(useVisionAI = false) {
       }),
     });
     const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) {
-      throw new Error(data.detail || "Auto-match failed");
-    }
+    if (!resp.ok) throw new Error(data.detail || "Auto-match failed");
 
     state.autoAnalysis = data.analysis;
     state.config = data.config;
@@ -500,8 +664,7 @@ async function runAutoMatch(useVisionAI = false) {
 
     if (data.brush_data_url) {
       await paintBrushFromDataUrl(data.brush_data_url);
-      // Keep mask overlay hidden by default in Layer 1 so the finished result looks clean!
-      setMaskVisibility(false);
+      setMaskVisibility(state.advancedOpen);
     }
     if (data.analysis && data.analysis.subject_center) {
       state.subjectCenter = data.analysis.subject_center;
@@ -513,23 +676,17 @@ async function runAutoMatch(useVisionAI = false) {
     requestAnimationFrame(() => fitStageImages());
 
     const label = data.analysis?.archetype_label || "Auto-Match";
-    $("activeLookTitle").textContent = `Auto: ${label}`;
-    $("autoBadge").textContent = `✨ ${label}`;
-    $("autoBadge").title = data.analysis?.plain_summary || "";
+    const sec = `${(data.total_ms / 1000).toFixed(2)}s`;
+    state.isProcessing = false;
+    setStatus(sec);
 
-    const sec = (data.total_ms / 1000).toFixed(2);
-    setStatus(`${sec}s`);
-
-    const noteBanner = $("noteBanner");
-    const extra = (data.notes || []).join(" ");
-    const msg = extra || (data.analysis?.plain_summary ? `✨ Detected ${label}: ${data.analysis.plain_summary}` : "");
-    if (msg) {
-      noteBanner.textContent = msg;
-      noteBanner.classList.remove("hidden");
-    } else {
-      noteBanner.classList.add("hidden");
-    }
+    const extraNote = (data.notes || []).find((n) => n && n.trim()) || "";
+    const cleanSummary = extraNote
+      ? extraNote.replace(/^✨\s*/, "")
+      : (data.analysis?.plain_summary || "Face locked sharp, natural camera motion matched");
+    setDetectionPill(`Detected: ${label} · ${cleanSummary}`, cleanSummary);
   } catch (err) {
+    state.isProcessing = false;
     setStatus("Error");
     showToast(err.message, 3500);
   } finally {
@@ -542,8 +699,7 @@ async function runAutoMatch(useVisionAI = false) {
 async function processCurrentPhoto() {
   if (!state.imageId || !state.config) return;
   state.isProcessing = true;
-  const loadText = $("loadingOverlay").querySelector("span");
-  if (loadText) loadText.textContent = "Updating…";
+  $("loadingText").textContent = "Rendering optical blur…";
   $("loadingOverlay").classList.remove("hidden");
   setStatus("Updating…");
 
@@ -567,17 +723,11 @@ async function processCurrentPhoto() {
     updateViewerImages();
     requestAnimationFrame(() => fitStageImages());
 
-    const sec = (data.total_ms / 1000).toFixed(2);
-    setStatus(`${sec}s`);
-
-    const noteBanner = $("noteBanner");
-    if (data.notes && data.notes.length > 0) {
-      noteBanner.textContent = data.notes.join(" ");
-      noteBanner.classList.remove("hidden");
-    } else if (!state.autoMode) {
-      noteBanner.classList.add("hidden");
-    }
+    const sec = `${(data.total_ms / 1000).toFixed(2)}s`;
+    state.isProcessing = false;
+    setStatus(sec);
   } catch (err) {
+    state.isProcessing = false;
     setStatus("Error");
     showToast(err.message);
   } finally {
@@ -586,7 +736,7 @@ async function processCurrentPhoto() {
   }
 }
 
-// ---------- Bottom Filmstrip ----------
+// ---------- Screen 03: Bottom 5-Stage Filmstrip ----------
 function renderFilmstrip() {
   const strip = $("filmstrip");
   strip.innerHTML = "";
@@ -600,13 +750,11 @@ function renderFilmstrip() {
       (!isEnabled ? " is-off" : "");
     card.title = meta.label;
 
-    const thumbWrap = document.createElement("div");
-    thumbWrap.className = "film-thumb-wrap";
     const img = document.createElement("img");
     img.className = "film-thumb";
-    img.src = state.stages[meta.key] || "";
+    img.src = state.stages[meta.key] || state.originalUrl || "";
     img.alt = meta.label;
-    thumbWrap.appendChild(img);
+    card.appendChild(img);
 
     const info = document.createElement("div");
     info.className = "film-info";
@@ -618,6 +766,7 @@ function renderFilmstrip() {
 
     if (meta.toggleField) {
       const tgl = document.createElement("button");
+      tgl.type = "button";
       tgl.className = "film-toggle" + (isEnabled ? "" : " off");
       tgl.textContent = isEnabled ? "ON" : "OFF";
       tgl.title = `Turn ${meta.label} ${isEnabled ? "off" : "on"}`;
@@ -630,9 +779,13 @@ function renderFilmstrip() {
         processCurrentPhoto();
       });
       info.appendChild(tgl);
+    } else {
+      const raw = document.createElement("span");
+      raw.className = "film-raw";
+      raw.textContent = "Raw";
+      info.appendChild(raw);
     }
 
-    card.appendChild(thumbWrap);
     card.appendChild(info);
 
     card.addEventListener("click", () => {
@@ -640,11 +793,16 @@ function renderFilmstrip() {
       renderFilmstrip();
       updateViewerImages();
       if (meta.key !== "original") {
-        openAccordionStage(meta.key);
+        selectInspectorStep(meta.key);
       }
     });
     strip.appendChild(card);
   }
+}
+
+function updateLeftBadge() {
+  const showMaskLabel = state.brushHasStrokes && state.showMaskOverlay;
+  $("leftBadge").textContent = showMaskLabel ? "Original + AI Mask" : "Original";
 }
 
 function updateViewerImages() {
@@ -652,15 +810,27 @@ function updateViewerImages() {
   const selUrl = state.stages[state.selectedStage] || state.stages.stage5 || origUrl;
   const meta = STAGE_META.find((m) => m.key === state.selectedStage) || STAGE_META[5];
 
-  const badgeText =
-    state.selectedStage === "stage5"
-      ? (state.autoMode && state.autoAnalysis ? `✨ ${state.autoAnalysis.archetype_label}` : (state.config?.name || "Final Result"))
-      : meta.label;
+  let badgeText = meta.label;
+  if (state.selectedStage === "stage5") {
+    if (state.autoMode && state.autoAnalysis) {
+      const methodNames = {
+        flash_drag: "Flash Drag",
+        handheld_shake: "Handheld",
+        camera_swirl: "Whip Swirl",
+        pivot_swing: "Arm Swing",
+        cloud_ai: "Cloud AI",
+      };
+      const mName = methodNames[state.config?.stage2_motion?.method] || state.autoAnalysis.archetype_label;
+      badgeText = `Auto-Match · ${mName}`;
+    } else {
+      badgeText = SHORT_PRESET_NAMES[state.activePresetId] || state.config?.name || "Final Result";
+    }
+  }
 
   $("rightBadge").textContent = badgeText;
   $("wipeRightBadge").textContent = badgeText;
+  updateLeftBadge();
 
-  // Keep Original URL stable so the Before image never flickers or reloads unnecessarily
   if (origUrl && $("origImg").getAttribute("src") !== origUrl) {
     $("origImg").src = origUrl;
   }
@@ -670,8 +840,6 @@ function updateViewerImages() {
 
   if (!selUrl) return;
 
-  // Preload & decode new After image cleanly before swapping so Wipe Slider & Side-by-Side
-  // repaint IMMEDIATELY on the exact frame the new render is ready (no dragging needed!)
   const loader = new Image();
   loader.onload = () => {
     $("stageImg").src = selUrl;
@@ -798,6 +966,7 @@ function initBrushCanvases(w, h) {
   c1.getContext("2d").clearRect(0, 0, w, h);
   c2.getContext("2d").clearRect(0, 0, w, h);
   state.brushHasStrokes = false;
+  updateMaskIndicators();
 }
 
 function getBrushDataUrl() {
@@ -813,11 +982,21 @@ function mirrorBrushCanvas() {
   ctx.drawImage(src, 0, 0);
 }
 
+function updateMaskIndicators() {
+  const lbl = $("maskStatusLabel");
+  const toggleBtn = $("toggleMaskBtn");
+  const visible = state.showMaskOverlay && state.brushHasStrokes;
+  lbl.textContent = visible ? "Mask Visible" : (state.brushHasStrokes ? "Mask Hidden" : "No Mask Yet");
+  lbl.classList.toggle("visible", visible);
+  toggleBtn.textContent = state.showMaskOverlay ? "Hide" : "Show";
+  updateLeftBadge();
+}
+
 function setMaskVisibility(show) {
-  state.showMaskOverlay = show;
-  $("brushCanvas").classList.toggle("mask-hidden", !show);
-  $("brushMirrorCanvas").classList.toggle("mask-hidden", !show);
-  $("toggleMaskBtn").classList.toggle("active-ghost", show);
+  state.showMaskOverlay = Boolean(show);
+  $("brushCanvas").classList.toggle("mask-hidden", !state.showMaskOverlay);
+  $("brushMirrorCanvas").classList.toggle("mask-hidden", !state.showMaskOverlay);
+  updateMaskIndicators();
 }
 
 async function paintBrushFromDataUrl(dataUrl) {
@@ -830,6 +1009,7 @@ async function paintBrushFromDataUrl(dataUrl) {
       ctx.drawImage(img, 0, 0, c1.width, c1.height);
       state.brushHasStrokes = true;
       mirrorBrushCanvas();
+      updateMaskIndicators();
       resolve();
     };
     img.onerror = reject;
@@ -846,17 +1026,19 @@ async function runAIAutoPaint() {
   const sResp = await fetch("/api/settings");
   const sData = await sResp.json();
   if (!sData.vision_has_api_key) {
-    showToast("Paste your Kie.ai, Gemini, OpenAI, or OpenRouter API key first.");
+    showToast("Add your Kie.ai, Gemini, OpenAI, or OpenRouter API key in Settings first.");
     await openSettingsModal();
     $("visionKeyInput").focus();
     return;
   }
 
-  const btn = $("aiAutoPaintBtn");
-  const prevText = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = "✨ Looking…";
+  const btn1 = $("aiAutoPaintBtn");
+  const btn2 = $("dockAiMaskBtn");
+  btn1.disabled = true;
+  btn2.disabled = true;
+  $("loadingText").textContent = "Vision AI tracing face & arms…";
   $("loadingOverlay").classList.remove("hidden");
+  state.isProcessing = true;
   setStatus("AI directing…");
 
   try {
@@ -872,9 +1054,7 @@ async function runAIAutoPaint() {
       }),
     });
     const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) {
-      throw new Error(data.detail || "AI Auto-Paint failed");
-    }
+    if (!resp.ok) throw new Error(data.detail || "AI Auto-Paint failed");
 
     if (data.brush_data_url) {
       await paintBrushFromDataUrl(data.brush_data_url);
@@ -889,32 +1069,36 @@ async function runAIAutoPaint() {
     updateViewerImages();
     requestAnimationFrame(() => fitStageImages());
 
-    const sec = (data.total_ms / 1000).toFixed(2);
-    setStatus(`AI ready (${sec}s)`);
-
-    const noteBanner = $("noteBanner");
-    noteBanner.textContent = `✨ ${data.model_used}: ${data.scene_summary} (${data.sharp_regions} sharp, ${data.blur_regions} blur, ${data.pivots_count} arm pivots)`;
-    noteBanner.classList.remove("hidden");
-    showToast("AI traced face & moving limbs!");
+    const sec = `${(data.total_ms / 1000).toFixed(2)}s`;
+    state.isProcessing = false;
+    setStatus(sec);
+    setDetectionPill(
+      `AI Mask: ${data.scene_summary} (${data.sharp_regions} sharp, ${data.blur_regions} moving)`,
+      data.scene_summary
+    );
+    showToast("AI traced face & moving arms!");
   } catch (err) {
+    state.isProcessing = false;
     setStatus("AI error");
-    showToast(err.message, 4200);
+    showToast(err.message, 4000);
   } finally {
-    btn.disabled = false;
-    btn.textContent = prevText;
+    state.isProcessing = false;
+    btn1.disabled = false;
+    btn2.disabled = false;
     $("loadingOverlay").classList.add("hidden");
   }
 }
 
 function setBrushMode(mode) {
-  state.brushMode = mode;
-  document.querySelectorAll(".brush-btn").forEach((b) => {
-    b.classList.toggle("active", b.dataset.brush === mode);
+  const next = state.brushMode === mode && mode !== "off" ? "off" : mode;
+  state.brushMode = next;
+  document.querySelectorAll(".brush-mode-btn").forEach((b) => {
+    b.classList.toggle("active", b.dataset.brush === next);
   });
   const canvas = $("brushCanvas");
-  canvas.classList.toggle("painting", mode !== "off");
-  $("brushHint").classList.toggle("hidden", mode === "off");
-  if (mode !== "off") {
+  canvas.classList.toggle("painting", next !== "off");
+  $("brushSizeRow").classList.toggle("hidden", next === "off");
+  if (next !== "off") {
     setMaskVisibility(true);
     if (state.viewMode !== "side") setViewMode("side");
   }
@@ -947,6 +1131,7 @@ function setupBrushEvents() {
     ctx.stroke();
     state.brushHasStrokes = true;
     mirrorBrushCanvas();
+    updateMaskIndicators();
   };
 
   canvas.addEventListener("mousedown", (e) => {
@@ -975,13 +1160,13 @@ function setupBrushEvents() {
   });
 }
 
-// ---------- Tab 2: Option Showdown ----------
+// ---------- Screen 04: Option Showdown ----------
 function findPresetById(id) {
   return allPresets().find((p) => p.id === id);
 }
 
 function buildShowdownOptions() {
-  const mode = $("showdownModeSelect").value;
+  const set = state.showdownSet;
   const withSubject = (cfg) => {
     const c = deepClone(cfg);
     c.stage1_focus.focus_center_x = state.subjectCenter[0];
@@ -989,29 +1174,36 @@ function buildShowdownOptions() {
     return c;
   };
 
-  if (mode === "vibes") {
-    const p1 = findPresetById("flash_party_blur");
-    const p2 = findPresetById("club_whip_swirl");
-    const p3 = findPresetById("warm_night_missed_focus");
+  const pick = (id, fallbackIdx = 0) => {
+    const p = findPresetById(id) || state.presets.builtin[fallbackIdx] || allPresets()[0];
+    return withSubject(p.config);
+  };
+
+  if (set === "night") {
     return [
-      { label: "Option A — Flash Party", subtitle: "Crisp flash face + subtle ghosting & night glow", config: withSubject(p1.config) },
-      { label: "Option B — Club Whip Swirl", subtitle: "Face anchored while lights & room swirl in an arc", config: withSubject(p2.config) },
-      { label: "Option C — Warm Night Focus", subtitle: "Dreamy circular missed focus + golden glow", config: withSubject(p3.config) },
+      { label: "A · Flash Party", subtitle: "Crisp face + trailing arms", config: pick("flash_party_blur", 0) },
+      { label: "B · Club Whip Swirl", subtitle: "Face anchored + room flick swirl", config: pick("club_whip_swirl", 1) },
+      { label: "C · 3AM Night Zoom", subtitle: "Pinch-zoomed phone + waxy grain", config: pick("3am_night_zoom", 2) },
     ];
   }
 
-  if (mode === "casual") {
-    const p1 = findPresetById("quick_gym_mirror_snap");
-    const p2 = findPresetById("daylight_candid_snap");
-    const p3 = findPresetById("moving_hands_party");
+  if (set === "casual") {
     return [
-      { label: "Option A — Mirror Selfie", subtitle: "Subtle curved thumb-press shake + clean glass sheen", config: withSubject(p1.config) },
-      { label: "Option B — Daylight Candid", subtitle: "Rich blacks, crisp face, spontaneous outer motion", config: withSubject(p2.config) },
-      { label: "Option C — Moving Hands", subtitle: "Crisp face & background, swinging arms & hands", config: withSubject(p3.config) },
+      { label: "A · Mirror Selfie", subtitle: "Subtle thumb-press shake + clean glass", config: pick("quick_gym_mirror_snap", 0) },
+      { label: "B · Daylight Candid", subtitle: "Rich blacks + spontaneous outer motion", config: pick("daylight_candid_snap", 1) },
+      { label: "C · Moving Hands", subtitle: "Crisp face + swinging arms & hands", config: pick("moving_hands_party", 2) },
     ];
   }
 
-  // 3 Motion styles on current config
+  if (set === "lofi") {
+    return [
+      { label: "A · 3AM Night Zoom", subtitle: "Pinch-zoomed sensor crop + sodium cast", config: pick("3am_night_zoom", 0) },
+      { label: "B · Lo-Fi Streetlight", subtitle: "Heavy night drag + warm streetlight tint", config: pick("lofi_streetlight_blur", 1) },
+      { label: "C · Warm Night Focus", subtitle: "Dreamy missed focus + golden bloom", config: pick("warm_night_missed_focus", 2) },
+    ];
+  }
+
+  // Motion Styles on current config
   const base = withSubject(state.config);
   const optA = deepClone(base);
   optA.name = "Handheld Micro-Shake";
@@ -1033,16 +1225,17 @@ function buildShowdownOptions() {
   optC.stage2_motion.swing_intensity = Math.max(0.78, base.stage2_motion.swing_intensity || 0.8);
 
   return [
-    { label: "Option A — Handheld Shake", subtitle: "Whole-frame curved thumb shake + subtle ghosting", config: optA },
-    { label: "Option B — Flash Party Drag", subtitle: "Crisp flash face + trailing background & edges", config: optB },
-    { label: "Option C — Moving Hands Swing", subtitle: "Sharp face + swinging arms & hands", config: optC },
+    { label: "A · Handheld Shake", subtitle: "Whole-frame curved thumb shake", config: optA },
+    { label: "B · Flash Party Drag", subtitle: "Crisp flash face + trailing edges", config: optB },
+    { label: "C · Moving Hands Swing", subtitle: "Sharp face + swinging arms & hands", config: optC },
   ];
 }
 
 async function runShowdown() {
   if (!state.imageId || !state.config) return;
   const grid = $("showdownGrid");
-  grid.innerHTML = `<div style="grid-column:1/-1;display:flex;align-items:center;justify-content:center;gap:10px;color:var(--text-muted);"><div class="spinner"></div><span>Building 3 showdown options…</span></div>`;
+  grid.innerHTML = `<div class="showdown-loading"><div class="spinner"></div><span>Rendering 3 looks side-by-side…</span></div>`;
+  state.isProcessing = true;
   setStatus("Showdown…");
 
   try {
@@ -1061,12 +1254,60 @@ async function runShowdown() {
     }
     const data = await resp.json();
     state.showdownResults = data;
+    state.selectedShowdownIdx = 0;
+    if (data.full_width) state.fullWidth = data.full_width;
+    if (data.full_height) state.fullHeight = data.full_height;
+
     renderShowdownGrid(data);
-    setStatus(`${(data.total_ms / 1000).toFixed(2)}s`);
+    state.isProcessing = false;
+    setStatus(`3 looks · ${(data.total_ms / 1000).toFixed(1)}s`);
   } catch (err) {
+    state.isProcessing = false;
     grid.innerHTML = "";
     showToast(err.message);
     setStatus("Error");
+  }
+}
+
+function bindShowdownSyncedPanning() {
+  const wraps = Array.from(document.querySelectorAll(".showdown-img-wrap"));
+  let syncing = false;
+
+  for (const src of wraps) {
+    src.addEventListener("scroll", () => {
+      if (syncing) return;
+      syncing = true;
+      for (const dst of wraps) {
+        if (dst !== src) {
+          dst.scrollLeft = src.scrollLeft;
+          dst.scrollTop = src.scrollTop;
+        }
+      }
+      syncing = false;
+    });
+
+    let dragging = false;
+    let sx = 0;
+    let sy = 0;
+    let sl = 0;
+    let st = 0;
+
+    src.addEventListener("mousedown", (e) => {
+      if (!state.showdownZoomed) return;
+      dragging = true;
+      sx = e.clientX;
+      sy = e.clientY;
+      sl = src.scrollLeft;
+      st = src.scrollTop;
+    });
+    window.addEventListener("mousemove", (e) => {
+      if (!dragging) return;
+      src.scrollLeft = sl - (e.clientX - sx);
+      src.scrollTop = st - (e.clientY - sy);
+    });
+    window.addEventListener("mouseup", () => {
+      dragging = false;
+    });
   }
 }
 
@@ -1074,96 +1315,100 @@ function renderShowdownGrid(data) {
   const grid = $("showdownGrid");
   grid.innerHTML = "";
 
+  const dims = state.fullWidth && state.fullHeight ? `${state.fullWidth} × ${state.fullHeight}` : "Original";
   const origCard = document.createElement("div");
-  origCard.className = "showdown-card";
+  origCard.className = "showdown-card original-card";
   origCard.innerHTML = `
     <div class="showdown-card-head">
-      <div class="showdown-card-title">Original</div>
-      <div class="showdown-card-sub">Before blur &amp; night optics</div>
+      <div class="showdown-card-titles">
+        <div class="showdown-card-title">Original</div>
+        <div class="showdown-card-sub">Unedited reference photo</div>
+      </div>
     </div>
     <div class="showdown-img-wrap ${state.showdownZoomed ? "zoomed" : ""}">
-      <img src="${data.original_url}" alt="Original" />
+      <img src="${data.original_url}" alt="Original" draggable="false" />
     </div>
     <div class="showdown-card-foot">
-      <span class="showdown-time">Reference</span>
+      <span class="showdown-time">${dims}</span>
+      <span class="showdown-baseline">Baseline</span>
     </div>
   `;
   grid.appendChild(origCard);
 
-  for (const opt of data.options) {
+  data.options.forEach((opt, idx) => {
+    const isSel = idx === state.selectedShowdownIdx;
     const card = document.createElement("div");
-    card.className = "showdown-card";
+    card.className = "showdown-card" + (isSel ? " selected" : "");
     card.innerHTML = `
       <div class="showdown-card-head">
-        <div class="showdown-card-title">${opt.label}</div>
-        <div class="showdown-card-sub">${opt.subtitle}</div>
+        <div class="showdown-card-titles">
+          <div class="showdown-card-title"></div>
+          <div class="showdown-card-sub"></div>
+        </div>
+        ${isSel ? `<span class="pick-badge">${idx === 0 ? "AUTO PICK" : "SELECTED"}</span>` : ""}
       </div>
       <div class="showdown-img-wrap ${state.showdownZoomed ? "zoomed" : ""}">
-        <img src="${opt.image_url}" alt="${opt.label}" />
+        <img src="${opt.image_url}" alt="" draggable="false" />
       </div>
       <div class="showdown-card-foot">
         <span class="showdown-time">${(opt.total_ms / 1000).toFixed(2)}s</span>
-        <button class="btn btn-primary btn-xs pick-btn">Pick Winner</button>
+        <button type="button" class="btn ${isSel ? "btn-amber" : "btn-surface"} pick-btn">Use This Look</button>
       </div>
     `;
-    card.querySelector(".pick-btn").addEventListener("click", () => {
+    card.querySelector(".showdown-card-title").textContent = opt.label;
+    card.querySelector(".showdown-card-sub").textContent = opt.subtitle;
+
+    card.addEventListener("click", (e) => {
+      if (e.target.closest(".pick-btn") || state.showdownZoomed) return;
+      state.selectedShowdownIdx = idx;
+      renderShowdownGrid(data);
+    });
+
+    card.querySelector(".pick-btn").addEventListener("click", (e) => {
+      e.stopPropagation();
       state.autoMode = false;
       state.activePresetId = "";
       state.config = deepClone(opt.config);
-      $("activeLookTitle").textContent = opt.label;
-      $("autoBadge").textContent = opt.label.replace(/^Option [A-C] — /, "Look: ");
+      const clean = opt.label.replace(/^[A-C]\s*·\s*/, "");
+      setDetectionPill(`Look: ${clean} · ${opt.subtitle}`, opt.subtitle);
       syncControlsFromConfig();
       renderPresetBar();
       switchTab("qa");
       processCurrentPhoto();
-      showToast(`Selected "${opt.label}"!`);
+      showToast(`Loaded "${clean}" in Studio`);
     });
-    grid.appendChild(card);
-  }
-}
 
-// ---------- Tabs ----------
-function switchTab(tab) {
-  state.activeTab = tab;
-  document.querySelectorAll(".tab-btn").forEach((b) => {
-    const isAct = b.dataset.tab === tab;
-    b.classList.toggle("active", isAct);
-    b.setAttribute("aria-selected", String(isAct));
+    grid.appendChild(card);
   });
 
-  if (!state.imageId) {
-    $("tab-qa").classList.add("hidden");
-    $("tab-showdown").classList.add("hidden");
-    return;
-  }
-
-  $("tab-qa").classList.toggle("hidden", tab !== "qa");
-  $("tab-showdown").classList.toggle("hidden", tab !== "showdown");
-
-  if (tab === "qa") {
-    requestAnimationFrame(() => fitStageImages());
-  } else if (tab === "showdown") {
-    runShowdown();
-  }
+  bindShowdownSyncedPanning();
 }
 
-// ---------- Download Full-Resolution Result ----------
+// ---------- Export Full-Resolution / Export Winner ----------
 async function downloadFinalResult() {
   if (!state.imageId || !state.config) return;
+
+  let exportCfg = state.config;
+  if (state.activeTab === "showdown" && state.showdownResults?.options?.[state.selectedShowdownIdx]) {
+    exportCfg = state.showdownResults.options[state.selectedShowdownIdx].config;
+  }
+
   const btn = $("downloadBtn");
+  const prevLabel = btn.textContent;
   btn.disabled = true;
-  btn.textContent = "Saving…";
+  btn.textContent = "Exporting…";
+
   try {
     const resp = await fetch("/api/download", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         image_id: state.imageId,
-        config: state.config,
+        config: exportCfg,
         brush_data_url: getBrushDataUrl(),
       }),
     });
-    if (!resp.ok) throw new Error("Download failed");
+    if (!resp.ok) throw new Error("Export failed");
     const blob = await resp.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -1175,12 +1420,12 @@ async function downloadFinalResult() {
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
-    showToast("Downloaded full-resolution photo!");
+    showToast("Exported full-resolution JPG!");
   } catch (err) {
     showToast(err.message);
   } finally {
     btn.disabled = false;
-    btn.textContent = "Download";
+    btn.textContent = prevLabel;
   }
 }
 
@@ -1215,7 +1460,7 @@ async function openSettingsModal() {
   $("visionKeyInput").value = data.vision_has_api_key ? "__KEEP__" : "";
   $("visionKeyStatus").textContent = data.vision_has_api_key
     ? `Saved key: ${data.vision_api_key_preview} (clear box to remove)`
-    : "Paste your Kie.ai, Gemini, OpenAI, or OpenRouter key to enable ✨ AI Auto-Paint.";
+    : "Paste your Kie.ai, Gemini, OpenAI, or OpenRouter key to enable AI Auto-Paint.";
   populateVisionModelsDropdown(state.suggestedModels[vProv] || [], data.vision_model);
   $("autoRunVisionCheck").checked = state.autoRunVision;
 
@@ -1244,7 +1489,7 @@ async function fetchLiveVisionModels() {
     const cur = $("visionCustomModelInput").value.trim() || $("visionModelSelect").value;
     populateVisionModelsDropdown(data.models || [], cur);
     showToast(`Loaded ${(data.models || []).length} models for ${provider}`);
-  } catch (err) {
+  } catch (_) {
     showToast("Could not fetch live models — check your API key.");
   } finally {
     btn.textContent = prev;
@@ -1271,6 +1516,7 @@ async function saveSettings() {
   });
   if (resp.ok) {
     $("settingsModal").classList.add("hidden");
+    await refreshVisionPill();
     showToast("AI Settings saved!");
   }
 }
@@ -1278,7 +1524,7 @@ async function saveSettings() {
 async function saveCustomPreset() {
   const name = $("presetNameInput").value.trim();
   if (!name) {
-    showToast("Please type a name for your preset.");
+    showToast("Type a name for your preset.");
     return;
   }
   readControlsIntoConfig();
@@ -1302,19 +1548,33 @@ async function saveCustomPreset() {
   await loadPresets();
   state.autoMode = false;
   state.activePresetId = saved.id;
-  $("activeLookTitle").textContent = saved.name;
   renderPresetBar();
   showToast(`Saved "${saved.name}"!`);
 }
 
-// ---------- Bootstrap ----------
+// ---------- Bootstrap & Event Wiring ----------
 function bindEvents() {
-  setupAccordion();
+  $("brandHomeBtn").addEventListener("click", () => {
+    showHomeScreen();
+  });
 
+  $("visionReadyPill").addEventListener("click", openSettingsModal);
   $("toggleAdvancedBtn").addEventListener("click", () => setAdvancedOpen(!state.advancedOpen));
 
   document.querySelectorAll(".tab-btn").forEach((btn) => {
     btn.addEventListener("click", () => switchTab(btn.dataset.tab));
+  });
+
+  document.querySelectorAll(".step-tab").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const step = btn.dataset.step;
+      selectInspectorStep(step);
+      if (state.stages[step]) {
+        state.selectedStage = step;
+        renderFilmstrip();
+        updateViewerImages();
+      }
+    });
   });
 
   $("fileInput").addEventListener("change", (e) => {
@@ -1344,9 +1604,11 @@ function bindEvents() {
     }
   });
 
-  // Layer 1 Master Strength Slider & Quick Re-roll
+  // Layer 1 Strength Slider & Vary Shake
   $("autoStrengthSlider").addEventListener("input", () => {
-    const pct = parseInt($("autoStrengthSlider").value, 10);
+    const el = $("autoStrengthSlider");
+    updateSliderFill(el);
+    const pct = parseInt(el.value, 10);
     $("autoStrengthVal").textContent = `${pct}%`;
     state.autoStrength = pct / 100.0;
     if (!state.imageId) return;
@@ -1376,10 +1638,18 @@ function bindEvents() {
   $("modeWipeBtn").addEventListener("click", () => setViewMode("wipe"));
   $("zoomBtn").addEventListener("click", toggleZoom);
 
-  document.querySelectorAll(".brush-btn").forEach((btn) => {
+  // Brush & AI Auto-Paint controls
+  document.querySelectorAll(".brush-mode-btn").forEach((btn) => {
     btn.addEventListener("click", () => setBrushMode(btn.dataset.brush));
   });
+
+  $("brushSizeInput").addEventListener("input", () => {
+    updateSliderFill($("brushSizeInput"));
+    $("brushSizeVal").textContent = $("brushSizeInput").value;
+  });
+
   $("aiAutoPaintBtn").addEventListener("click", runAIAutoPaint);
+  $("dockAiMaskBtn").addEventListener("click", runAIAutoPaint);
   $("toggleMaskBtn").addEventListener("click", () => setMaskVisibility(!state.showMaskOverlay));
   $("clearBrushBtn").addEventListener("click", () => {
     if (!state.previewWidth) return;
@@ -1387,7 +1657,7 @@ function bindEvents() {
     if (state.config && state.config.stage2_motion) {
       state.config.stage2_motion.ai_pivots = [];
     }
-    showToast("Cleared painted brush");
+    showToast("Cleared AI mask & brush strokes");
     if (state.imageId) processCurrentPhoto();
   });
 
@@ -1408,6 +1678,7 @@ function bindEvents() {
   ];
   for (const id of controlIds) {
     const el = $(id);
+    if (!el) continue;
     const ev = el.type === "range" ? "input" : "change";
     el.addEventListener(ev, scheduleAutoProcess);
   }
@@ -1424,10 +1695,20 @@ function bindEvents() {
     processCurrentPhoto();
   });
 
-  $("runShowdownBtn").addEventListener("click", runShowdown);
-  $("showdownModeSelect").addEventListener("change", () => {
-    if (state.imageId && state.activeTab === "showdown") runShowdown();
+  // Showdown Compare Set pills & Zoom
+  document.querySelectorAll("#showdownSetTabs .set-pill").forEach((pill) => {
+    pill.addEventListener("click", () => {
+      state.showdownSet = pill.dataset.set;
+      document.querySelectorAll("#showdownSetTabs .set-pill").forEach((p) => {
+        p.classList.toggle("active", p === pill);
+      });
+      if (state.imageId && state.activeTab === "showdown") {
+        runShowdown();
+      }
+    });
   });
+
+  $("runShowdownBtn").addEventListener("click", runShowdown);
   $("showdownZoomBtn").addEventListener("click", () => {
     state.showdownZoomed = !state.showdownZoomed;
     $("showdownZoomBtn").classList.toggle("active", state.showdownZoomed);
@@ -1449,6 +1730,13 @@ function bindEvents() {
     btn.addEventListener("click", () => $(btn.dataset.closeModal).classList.add("hidden"));
   });
 
+  // Close modal on backdrop click or Escape
+  document.querySelectorAll(".modal").forEach((modal) => {
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal) modal.classList.add("hidden");
+    });
+  });
+
   window.addEventListener("resize", () => requestAnimationFrame(() => fitStageImages()));
   if (typeof ResizeObserver !== "undefined") {
     const ro = new ResizeObserver(() => requestAnimationFrame(() => fitStageImages()));
@@ -1456,16 +1744,21 @@ function bindEvents() {
   }
 
   window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      document.querySelectorAll(".modal").forEach((m) => m.classList.add("hidden"));
+      return;
+    }
     if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) return;
-    if (!state.imageId) return;
+    if (!state.imageId || state.showingHome) return;
+
     if (e.key === "z" || e.key === "Z") {
-      toggleZoom();
-    } else if (e.key >= "1" && e.key <= "5" && state.advancedOpen) {
+      if (state.activeTab === "qa") toggleZoom();
+    } else if (e.key >= "1" && e.key <= "5" && state.advancedOpen && state.activeTab === "qa") {
       const k = `stage${e.key}`;
       state.selectedStage = k;
+      selectInspectorStep(k);
       renderFilmstrip();
       updateViewerImages();
-      openAccordionStage(k);
     }
   });
 
@@ -1476,5 +1769,7 @@ function bindEvents() {
 
 window.addEventListener("DOMContentLoaded", async () => {
   bindEvents();
-  await loadPresets();
+  updateAllSliderFills();
+  updateTopbarMode();
+  await Promise.all([loadPresets(), refreshVisionPill(), loadRecentPhotos()]);
 });
