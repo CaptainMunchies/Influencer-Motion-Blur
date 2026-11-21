@@ -479,18 +479,27 @@ def auto_process_preview(req: AutoProcessRequest) -> Dict[str, Any]:
     ai_brush_url: Optional[str] = None
     ai_note: str = ""
 
-    # Optional hands-free Kie.ai / Vision AI upgrade when enabled & API key is saved
+    # Optional hands-free Kie.ai / Vision AI upgrade (enabled by default whenever an API key is saved!)
     if req.use_ai_vision:
         v_cfg = _load_vision_settings()
         if v_cfg.api_key:
             try:
                 dir_res = direct_photo_with_ai(photo.preview_rgb, v_cfg)
                 cfg = apply_director_guidance_to_config(cfg, dir_res, apply_slider_recommendations=False)
+                # Let the Vision AI pick the best motion style & direction for the pose
+                # while keeping our visually-calibrated tasteful slider strengths intact!
+                rec = dir_res.recommended_settings or {}
+                ai_method = rec.get("motion_method")
+                if ai_method in ("flash_drag", "handheld_shake", "pivot_swing", "camera_swirl"):
+                    cfg.stage2_motion.method = ai_method
+                if "direction_angle" in rec:
+                    cfg.stage2_motion.direction_angle = float(rec["direction_angle"])
+                cfg = cfg.validated()
                 brush_rgba = dir_res.brush_rgba
                 ai_brush_url = _encode_rgba_png_data_url(dir_res.brush_rgba)
-                ai_note = f"AI ({dir_res.model_used}): {dir_res.scene_summary}"
+                ai_note = f"✨ {dir_res.model_used}: {dir_res.scene_summary}"
             except Exception as exc:
-                ai_note = f"Local auto-match used (Vision AI skipped: {exc})"
+                ai_note = f"Auto-Match ran locally (AI Auto-Paint note: {exc})"
 
     cloud_cfg = _load_cloud_settings()
     res = run_pipeline(

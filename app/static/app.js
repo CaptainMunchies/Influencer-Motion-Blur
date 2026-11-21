@@ -25,8 +25,10 @@ const state = {
   autoStrength: 1.0,
   autoSeedOffset: 0,
   autoAnalysis: null,
-  autoRunVision: localStorage.getItem("ibl_auto_vision") === "1",
+  // ON by default: automatically uses AI Auto-Paint on every uploaded photo whenever an API key is saved
+  autoRunVision: localStorage.getItem("ibl_auto_vision") !== "0",
   imageId: null,
+  originalUrl: "",
   filename: "",
   previewWidth: 0,
   previewHeight: 0,
@@ -37,6 +39,7 @@ const state = {
   stages: {},
   selectedStage: "stage5",
   viewMode: "side",
+  wipePct: 50,
   zoomed: false,
   showdownZoomed: false,
   allExpanded: false,
@@ -116,7 +119,24 @@ function fitStageImages() {
     sizeStack($("rightViewport"), $("rightStack"), 12);
   } else {
     sizeStack($("wipeViewport"), $("wipeStack"), 16);
+    syncWipeInnerDimensions();
   }
+}
+
+function syncWipeInnerDimensions() {
+  const stack = $("wipeStack");
+  const beforeImg = $("wipeBeforeImg");
+  const clip = $("wipeClip");
+  const handle = $("wipeHandle");
+  if (!stack || !beforeImg || !clip || !handle) return;
+  const w = stack.style.width;
+  const h = stack.style.height;
+  if (w && h) {
+    beforeImg.style.width = w;
+    beforeImg.style.height = h;
+  }
+  clip.style.width = `${state.wipePct}%`;
+  handle.style.left = `${state.wipePct}%`;
 }
 
 // ---------- Accordion Sidebar ----------
@@ -385,12 +405,12 @@ function scheduleAutoProcess() {
   }, 340);
 }
 
-// ---------- Upload ----------
+// ---------- Upload (Always One-Shot Auto-Match + Auto AI Auto-Paint!) ----------
 async function uploadFile(file) {
   if (!file) return;
   const form = new FormData();
   form.append("file", file);
-  setStatus("Analyzing…");
+  setStatus("Uploading…");
 
   try {
     const resp = await fetch("/api/upload", { method: "POST", body: form });
@@ -400,11 +420,25 @@ async function uploadFile(file) {
     }
     const data = await resp.json();
     state.imageId = data.image_id;
+    state.originalUrl = data.original_url;
     state.filename = data.filename;
     state.previewWidth = data.preview_width;
     state.previewHeight = data.preview_height;
     state.subjectCenter = data.subject_center || [0.50, 0.34];
     state.autoSeedOffset = 0;
+
+    // Always start every new upload in clean Layer-1 Auto-Match mode
+    state.autoMode = true;
+    state.activePresetId = "auto";
+    state.selectedStage = "stage5";
+    renderPresetBar();
+
+    // Immediately show Original photo on screen so user never stares at a blank screen
+    state.stages = { original: data.original_url, stage5: data.original_url };
+    $("origImg").src = data.original_url;
+    $("wipeBeforeImg").src = data.original_url;
+    $("stageImg").src = data.original_url;
+    $("wipeAfterImg").src = data.original_url;
 
     initBrushCanvases(data.preview_width, data.preview_height);
     $("emptyState").classList.add("hidden");
@@ -412,20 +446,13 @@ async function uploadFile(file) {
     switchTab(state.activeTab);
     requestAnimationFrame(() => fitStageImages());
 
-    // Layer 1 Default: automatically match blur to this photo!
-    if (state.activePresetId === "auto" || state.autoMode) {
-      state.autoMode = true;
-      state.activePresetId = "auto";
-      renderPresetBar();
-      await runAutoMatch(state.autoRunVision);
-    } else {
-      const chosen = allPresets().find((p) => p.id === state.activePresetId);
-      if (chosen) {
-        applyPresetToState(chosen, true);
-      } else {
-        await runAutoMatch(state.autoRunVision);
-      }
-    }
+    // Check live whether a Vision AI key (e.g. Kie.ai) is configured so one-shot upload uses it automatically!
+    const sResp = await fetch("/api/settings");
+    const sData = await sResp.json().catch(() => ({}));
+    state.visionHasKey = Boolean(sData.vision_has_api_key);
+    const shouldUseVision = state.autoRunVision && state.visionHasKey;
+
+    await runAutoMatch(shouldUseVision);
   } catch (err) {
     setStatus("Upload error");
     showToast(err.message);
@@ -436,6 +463,8 @@ async function uploadFile(file) {
 async function runAutoMatch(useVisionAI = false) {
   if (!state.imageId) return;
   state.isProcessing = true;
+  const loadText = $("loadingOverlay").querySelector("span");
+  if (loadText) loadText.textContent = useVisionAI ? "✨ AI tracing face & arms…" : "Auto-matching…";
   $("loadingOverlay").classList.remove("hidden");
   setStatus(useVisionAI ? "AI Matching…" : "Auto-Matching…");
 
@@ -465,6 +494,9 @@ async function runAutoMatch(useVisionAI = false) {
       await paintBrushFromDataUrl(data.brush_data_url);
       // Keep mask overlay hidden by default in Layer 1 so the finished result looks clean!
       setMaskVisibility(false);
+    }
+    if (data.analysis && data.analysis.subject_center) {
+      state.subjectCenter = data.analysis.subject_center;
     }
 
     syncControlsFromConfig();
@@ -502,6 +534,8 @@ async function runAutoMatch(useVisionAI = false) {
 async function processCurrentPhoto() {
   if (!state.imageId || !state.config) return;
   state.isProcessing = true;
+  const loadText = $("loadingOverlay").querySelector("span");
+  if (loadText) loadText.textContent = "Updating…";
   $("loadingOverlay").classList.remove("hidden");
   setStatus("Updating…");
 
@@ -606,7 +640,7 @@ function renderFilmstrip() {
 }
 
 function updateViewerImages() {
-  const origUrl = state.stages.original || "";
+  const origUrl = state.originalUrl || state.stages.original || "";
   const selUrl = state.stages[state.selectedStage] || state.stages.stage5 || origUrl;
   const meta = STAGE_META.find((m) => m.key === state.selectedStage) || STAGE_META[5];
 
@@ -615,13 +649,31 @@ function updateViewerImages() {
       ? (state.autoMode && state.autoAnalysis ? `✨ ${state.autoAnalysis.archetype_label}` : (state.config?.name || "Final Result"))
       : meta.label;
 
-  $("origImg").src = origUrl;
-  $("stageImg").src = selUrl;
   $("rightBadge").textContent = badgeText;
-
-  $("wipeBeforeImg").src = origUrl;
-  $("wipeAfterImg").src = selUrl;
   $("wipeRightBadge").textContent = badgeText;
+
+  // Keep Original URL stable so the Before image never flickers or reloads unnecessarily
+  if (origUrl && $("origImg").getAttribute("src") !== origUrl) {
+    $("origImg").src = origUrl;
+  }
+  if (origUrl && $("wipeBeforeImg").getAttribute("src") !== origUrl) {
+    $("wipeBeforeImg").src = origUrl;
+  }
+
+  if (!selUrl) return;
+
+  // Preload & decode new After image cleanly before swapping so Wipe Slider & Side-by-Side
+  // repaint IMMEDIATELY on the exact frame the new render is ready (no dragging needed!)
+  const loader = new Image();
+  loader.onload = () => {
+    $("stageImg").src = selUrl;
+    $("wipeAfterImg").src = selUrl;
+    requestAnimationFrame(() => {
+      fitStageImages();
+      syncWipeInnerDimensions();
+    });
+  };
+  loader.src = selUrl;
 }
 
 // ---------- View Modes & Synced 100% Zoom ----------
@@ -700,16 +752,14 @@ function setupSyncedPanning() {
 
 function setupWipeSlider() {
   const stack = $("wipeStack");
-  const clip = $("wipeClip");
   const handle = $("wipeHandle");
   let dragging = false;
 
   const updatePct = (clientX) => {
     const rect = stack.getBoundingClientRect();
     if (rect.width <= 0) return;
-    const pct = Math.max(0, Math.min(100, ((clientX - rect.left) / rect.width) * 100));
-    clip.style.clipPath = `inset(0 ${100 - pct}% 0 0)`;
-    handle.style.left = `${pct}%`;
+    state.wipePct = Math.max(0, Math.min(100, ((clientX - rect.left) / rect.width) * 100));
+    syncWipeInnerDimensions();
   };
 
   handle.addEventListener("mousedown", (e) => {
