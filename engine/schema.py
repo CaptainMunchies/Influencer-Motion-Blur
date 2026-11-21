@@ -168,13 +168,15 @@ class Stage2MotionConfig:
 
 @dataclass
 class Stage3OpticsConfig:
-    """Stage 3: Dirty smartphone lens veiling glare, milky haze & subtle edge fringing."""
+    """Stage 3: Dirty smartphone lens veiling glare, flash falloff, bar shadow cast & edge fringing."""
 
     enabled: bool = True
     glow_amount: float = 0.35  # Linear-light highlight bloom & dirty-lens scatter (0..1)
     haze_lift: float = 0.22  # Gentle lifted milky blacks / atmospheric flash veil (0..1)
     warmth: float = 0.18  # Warm tint in highlight bloom (0..1)
     edge_fringing: float = 0.20  # Subtle radial chromatic aberration near edges (0..1)
+    flash_falloff: float = 0.0  # Direct on-camera phone flash cone + foreground specular pop (0..1)
+    bar_shadow_cast: float = 0.0  # Dirty green-cool bar/club shadow cast + warm highlight split (0..1)
 
     def validated(self) -> "Stage3OpticsConfig":
         return Stage3OpticsConfig(
@@ -183,6 +185,8 @@ class Stage3OpticsConfig:
             haze_lift=_clamp(self.haze_lift, 0.0, 1.0),
             warmth=_clamp(self.warmth, 0.0, 1.0),
             edge_fringing=_clamp(self.edge_fringing, 0.0, 1.0),
+            flash_falloff=_clamp(self.flash_falloff, 0.0, 1.0),
+            bar_shadow_cast=_clamp(self.bar_shadow_cast, 0.0, 1.0),
         )
 
 
@@ -214,15 +218,21 @@ class Stage4GrainConfig:
 
 @dataclass
 class Stage5CompressionConfig:
-    """Stage 5: Final Instagram upload softness & authentic 4:2:0 JPEG compression."""
+    """Stage 5: Accidental casual phone framing (tilt + off-center crop) & Instagram 4:2:0 polish."""
 
     enabled: bool = True
+    tilt_angle: float = 0.0  # Subtle accidental phone horizon tilt in degrees (-4.0..+4.0)
+    crop_offset: float = 0.0  # Subtle off-center casual framing shift + punch-in (0..1)
+    framing_seed: int = 42  # Deterministic off-center framing shift direction
     insta_softness: float = 0.25  # Gentle downscale-then-upscale softness (0..1)
     jpeg_quality: int = 82  # Authentic 4:2:0 JPEG quality (72..95)
 
     def validated(self) -> "Stage5CompressionConfig":
         return Stage5CompressionConfig(
             enabled=bool(self.enabled),
+            tilt_angle=_clamp(self.tilt_angle, -4.5, 4.5),
+            crop_offset=_clamp(self.crop_offset, 0.0, 1.0),
+            framing_seed=int(self.framing_seed),
             insta_softness=_clamp(self.insta_softness, 0.0, 1.0),
             jpeg_quality=int(_clamp(self.jpeg_quality, 60, 98)),
         )

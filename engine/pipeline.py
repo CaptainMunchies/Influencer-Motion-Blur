@@ -120,9 +120,13 @@ def run_pipeline(
     if return_intermediates:
         stages["stage2"] = linear_to_srgb_u8(lin_s2, cfg.color)
 
-    # Stage 3: Dirty Smartphone Lens Glow, Atmospheric Haze & Edge Fringing
+    # Stage 3: Dirty Smartphone Lens Glow, Flash Falloff, Bar Shadow Cast & Edge Fringing
     t3 = time.perf_counter()
-    lin_s3 = apply_stage3_optics(lin_s2, cfg.stage3_optics)
+    lin_s3 = apply_stage3_optics(
+        lin_s2,
+        cfg.stage3_optics,
+        focus_center=(cfg.stage1_focus.focus_center_x, cfg.stage1_focus.focus_center_y),
+    )
     srgb_s3 = linear_to_srgb_u8(lin_s3, cfg.color)
     timings["stage3"] = round((time.perf_counter() - t3) * 1000.0, 2)
     if return_intermediates:

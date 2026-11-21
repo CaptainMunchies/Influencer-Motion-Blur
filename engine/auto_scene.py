@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, List, Tuple
 
 import cv2
 import numpy as np
@@ -49,12 +49,14 @@ class AutoSceneAnalysis:
     sharpness_scale: float  # 0.45..1.05 automatic guard against double-blurring
     metrics: Dict[str, float]
     config: PipelineConfig
+    scene_role: str = "portrait"  # "portrait" | "non_face_object"
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "archetype": self.archetype,
             "archetype_label": self.archetype_label,
             "plain_summary": self.plain_summary,
+            "scene_role": self.scene_role,
             "subject_center": [round(self.subject_center[0], 3), round(self.subject_center[1], 3)],
             "existing_sharpness": round(self.existing_sharpness, 1),
             "sharpness_scale": round(self.sharpness_scale, 2),
@@ -63,30 +65,22 @@ class AutoSceneAnalysis:
         }
 
 
-def _detect_subject_center_fast(rgb_u8: np.ndarray) -> Tuple[float, float]:
-    """Estimate the real subject / face focal center (0..1, 0..1) in ~12ms on CPU.
-
-    Combines YCrCb skin-tone probability, local edge/texture saliency (rejecting flat walls/sky),
-    and a gentle upper-portrait framing prior so faces off to the left/right/lower-middle are
-    protected accurately even without a cloud Vision AI call.
-    """
+def _detect_subject_center_and_role(rgb_u8: np.ndarray) -> Tuple[float, float, str]:
+    """Estimate focal center (0..1, 0..1) AND whether the image is a portrait or non-face object shot."""
     h, w = rgb_u8.shape[:2]
-    # Work on a compact 240px grid for sub-10ms speed
     scale = 240.0 / max(h, w)
     sw, sh = max(32, int(round(w * scale))), max(32, int(round(h * scale)))
     small = cv2.resize(rgb_u8, (sw, sh), interpolation=cv2.INTER_AREA)
 
-    # 1. Broad multi-skin-tone probability map in YCrCb (inclusive across light to deep skin tones)
     ycrcb = cv2.cvtColor(small, cv2.COLOR_RGB2YCrCb).astype(np.float32)
     y_c, cr, cb = ycrcb[..., 0], ycrcb[..., 1], ycrcb[..., 2]
-    skin = (
+    skin_bin = (
         (y_c > 35.0)
         & (cr >= 131.0) & (cr <= 178.0)
         & (cb >= 74.0) & (cb <= 130.0)
     ).astype(np.float32)
-    skin = cv2.GaussianBlur(skin, (0, 0), sigmaX=max(2.0, sw * 0.04))
+    skin = cv2.GaussianBlur(skin_bin, (0, 0), sigmaX=max(2.0, sw * 0.04))
 
-    # 2. Local texture / contrast saliency (faces & subjects have structured edges vs plain walls)
     gray = cv2.cvtColor(small, cv2.COLOR_RGB2GRAY).astype(np.float32)
     gx = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
     gy = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
@@ -94,7 +88,6 @@ def _detect_subject_center_fast(rgb_u8: np.ndarray) -> Tuple[float, float]:
     grad_norm = np.clip(grad / (np.percentile(grad, 95) + 1e-4), 0.0, 1.0)
     grad_smooth = cv2.GaussianBlur(grad_norm, (0, 0), sigmaX=max(3.0, sw * 0.05))
 
-    # 3. Portrait prior favoring upper-half head/face zone (avoids locking onto legs in full-body shots!)
     yy, xx = np.mgrid[0:sh, 0:sw].astype(np.float32)
     xn = xx / max(1, sw - 1)
     yn = yy / max(1, sh - 1)
@@ -102,34 +95,53 @@ def _detect_subject_center_fast(rgb_u8: np.ndarray) -> Tuple[float, float]:
         np.clip(xn / 0.14, 0.0, 1.0)
         * np.clip((1.0 - xn) / 0.14, 0.0, 1.0)
         * np.clip(yn / 0.08, 0.0, 1.0)
-        * np.clip((1.0 - yn) / 0.24, 0.0, 1.0)
+        * np.clip((1.0 - yn) / 0.20, 0.0, 1.0)
     )
     upper_bias = np.exp(-(((yn - 0.31) / 0.25) ** 2)) * np.exp(-(((xn - 0.50) / 0.44) ** 2))
-    # Suppress lower third strongly when picking head/face center
     leg_suppress = np.where(yn > 0.62, np.clip(1.0 - (yn - 0.62) * 2.2, 0.15, 1.0), 1.0)
 
-    skin_peak = float(np.max(skin))
-    if skin_peak > 0.18:
+    # Tighter true-skin hue for portrait vs tabletop/wood/food role classification
+    role_skin_bin = (
+        (y_c > 40.0)
+        & (cr >= 135.0) & (cr <= 172.0)
+        & (cb >= 82.0) & (cb <= 126.0)
+    ).astype(np.float32)
+    role_skin = cv2.GaussianBlur(role_skin_bin, (0, 0), sigmaX=max(2.0, sw * 0.04))
+    upper_skin = role_skin[int(sh * 0.08) : int(sh * 0.56), int(sw * 0.16) : int(sw * 0.84)]
+    lower_skin = role_skin[int(sh * 0.56) : int(sh * 0.96), :]
+    upper_skin_peak = float(np.max(upper_skin)) if upper_skin.size else 0.0
+    upper_skin_mean = float(np.mean(upper_skin)) if upper_skin.size else 0.0
+    lower_skin_mean = float(np.mean(lower_skin)) if lower_skin.size else 0.0
+
+    wood_or_table = lower_skin_mean > upper_skin_mean * 1.85 and lower_skin_mean > 0.40
+    is_portrait = (upper_skin_peak > 0.24 and upper_skin_mean > 0.015 and not wood_or_table)
+    role = "portrait" if is_portrait else "non_face_object"
+
+    if is_portrait:
         score = (skin * (0.45 + 0.55 * grad_smooth)) * border_fade * (0.25 + 0.75 * upper_bias) * leg_suppress
     else:
-        score = grad_smooth * border_fade * (0.30 + 0.70 * upper_bias) * leg_suppress
+        # Non-face filler shot (table, drinks, food, pet, shoes): anchor on sharpest central-lower foreground detail
+        obj_prior = np.exp(-(((yn - 0.52) / 0.34) ** 2)) * np.exp(-(((xn - 0.50) / 0.42) ** 2))
+        score = grad_smooth * border_fade * (0.35 + 0.65 * obj_prior)
 
-    # Smooth score to locate the dominant head/subject peak rather than a tiny stray speck
     score = cv2.GaussianBlur(score, (0, 0), sigmaX=max(4.0, min(sw, sh) * 0.07))
     max_val = float(np.max(score))
     if max_val < 1e-4:
-        return (0.50, 0.34)
+        return (0.50, 0.34 if is_portrait else 0.52, role)
 
-    # Weighted centroid of top 15% peak pixels -> super stable focal anchor
     top = np.where(score >= max_val * 0.80, score, 0.0)
     total = float(np.sum(top))
     if total < 1e-6:
-        return (0.50, 0.34)
+        return (0.50, 0.34 if is_portrait else 0.52, role)
 
     cx = float(np.sum(top * xn) / total)
     cy = float(np.sum(top * yn) / total)
-    # Clamp inside sensible portrait bounds so falloff never collapses to a corner
-    return (float(np.clip(cx, 0.22, 0.78)), float(np.clip(cy, 0.18, 0.68)))
+    return (float(np.clip(cx, 0.22, 0.78)), float(np.clip(cy, 0.18, 0.74)), role)
+
+
+def _detect_subject_center_fast(rgb_u8: np.ndarray) -> Tuple[float, float]:
+    cx, cy, _ = _detect_subject_center_and_role(rgb_u8)
+    return (cx, cy)
 
 
 def _deterministic_seed_from_image(rgb_u8: np.ndarray) -> int:
@@ -142,12 +154,10 @@ def _deterministic_seed_from_image(rgb_u8: np.ndarray) -> int:
 def analyze_and_build_auto_config(
     rgb_u8: np.ndarray,
     strength: float = 1.0,
+    auto_tilt: bool = False,
+    auto_flash_cast: bool = True,
 ) -> AutoSceneAnalysis:
-    """Analyze any Instagram/social photo and return a tastefully calibrated PipelineConfig.
-
-    `strength` lets the user nudge overall intensity subtly (0.5 = whisper, 1.0 = optimal, 1.4 = bolder)
-    while keeping all 5 stages harmonically balanced.
-    """
+    """Analyze any Instagram/social photo (portrait OR non-face filler) and return a calibrated PipelineConfig."""
     strength = float(np.clip(strength, 0.25, 1.65))
     h, w = rgb_u8.shape[:2]
 
@@ -168,8 +178,8 @@ def analyze_and_build_auto_config(
     warmth = float(np.mean(work[..., 0].astype(np.float32) - work[..., 2].astype(np.float32)))
     mean_sat = float(np.mean(hsv[..., 1]))
 
-    # Detect subject center & measure subject sharpness vs outer frame
-    fx, fy = _detect_subject_center_fast(rgb_u8)
+    # Detect subject/object center & whether this shot has a portrait face or is a non-face object shot
+    fx, fy, scene_role = _detect_subject_center_and_role(rgb_u8)
     sx, sy = int(fx * mw), int(fy * mh)
     rx, ry = max(24, int(mw * 0.18)), max(24, int(mh * 0.18))
     subj_roi = gray[max(0, sy - ry) : min(mh, sy + ry), max(0, sx - rx) : min(mw, sx + rx)]
@@ -473,6 +483,31 @@ def analyze_and_build_auto_config(
             ),
         )
 
+    # Apply smart Flash Falloff + Dirty Bar Shadow Cast on dark/night scenes (never on bright daylight/mirror)
+    if auto_flash_cast:
+        if archetype == "flash_party":
+            cfg.stage3_optics.flash_falloff = round(0.54 * min(1.25, strength) * glow_guard, 2)
+            cfg.stage3_optics.bar_shadow_cast = round(0.52 * min(1.25, strength), 2)
+        elif archetype == "dark_night_moody":
+            cfg.stage3_optics.flash_falloff = round(0.32 * min(1.25, strength) * glow_guard, 2)
+            cfg.stage3_optics.bar_shadow_cast = round(0.58 * min(1.25, strength), 2)
+        elif archetype == "warm_night":
+            cfg.stage3_optics.flash_falloff = round(0.28 * min(1.25, strength) * glow_guard, 2)
+            cfg.stage3_optics.bar_shadow_cast = round(0.30 * min(1.25, strength), 2)
+
+    # Apply subtle accidental phone tilt & off-center crop when enabled
+    if auto_tilt:
+        tilt_choices = [-2.2, 1.8, -1.6, 2.4, -2.5, 1.5]
+        cfg.stage5_compression.tilt_angle = tilt_choices[seed % len(tilt_choices)]
+        cfg.stage5_compression.crop_offset = 0.28 if archetype != "indoor_candid" else 0.18
+        cfg.stage5_compression.framing_seed = seed
+
+    # Non-face filler photos (table, drinks, food, shoes, street) get cleaner object-centered focus
+    if scene_role == "non_face_object":
+        cfg.stage1_focus.falloff_mode = "edges"
+        cfg.stage1_focus.falloff_strength = min(cfg.stage1_focus.falloff_strength, 0.58)
+        summary = f"No-face scene ({label}) — anchored focus on foreground hero objects with natural phone flash, grain & framing."
+
     return AutoSceneAnalysis(
         archetype=archetype,
         archetype_label=label,
@@ -482,4 +517,157 @@ def analyze_and_build_auto_config(
         sharpness_scale=sharpness_scale,
         metrics=metrics,
         config=cfg.validated(),
+        scene_role=scene_role,
     )
+
+
+def _scene_fingerprint(rgb_u8: np.ndarray) -> np.ndarray:
+    """Compact lighting + color + spatial layout fingerprint to detect same-photoshoot / same-room slides."""
+    small = cv2.resize(rgb_u8, (96, 96), interpolation=cv2.INTER_AREA)
+    hsv = cv2.cvtColor(small, cv2.COLOR_RGB2HSV)
+
+    # 3D HSV color palette histogram (captures room walls, lighting cast, outfit palette)
+    hist = cv2.calcHist([hsv], [0, 1, 2], None, [8, 4, 4], [0, 180, 0, 256, 0, 256]).flatten().astype(np.float32)
+    hist /= (float(np.linalg.norm(hist)) + 1e-6)
+
+    # Low-res blurred Lab spatial grid (captures same background geometry/hallway/table)
+    lab = cv2.cvtColor(cv2.resize(small, (8, 8), interpolation=cv2.INTER_AREA), cv2.COLOR_RGB2LAB).astype(np.float32)
+    lab = (lab - np.mean(lab, axis=(0, 1), keepdims=True)) / (np.std(lab, axis=(0, 1), keepdims=True) + 1e-5)
+    spatial = lab.flatten()
+    spatial /= (float(np.linalg.norm(spatial)) + 1e-6)
+
+    # Weighted concatenation (color/lighting palette weighs more so different poses in the same room still cluster!)
+    vec = np.concatenate([hist * 0.78, spatial * 0.22]).astype(np.float32)
+    vec /= (float(np.linalg.norm(vec)) + 1e-6)
+    return vec
+
+
+def cluster_carousel_scenes(images_rgb: List[np.ndarray], similarity_threshold: float = 0.77) -> List[int]:
+    """Group slides from the same location/photoshoot/lighting into matching scene_group indices (0, 1, 2...).
+
+    Slides in the same scene_group MUST share the same camera look, lighting, flash falloff & shadow cast,
+    while slides from genuinely different settings/moments can naturally shift looks.
+    """
+    n = len(images_rgb)
+    if n == 0:
+        return []
+    fps = [_scene_fingerprint(img) for img in images_rgb]
+    group_ids: List[int] = [-1] * n
+    group_reps: List[np.ndarray] = []
+
+    for i, fp in enumerate(fps):
+        best_g = -1
+        best_sim = -1.0
+        for g_idx, rep in enumerate(group_reps):
+            sim = float(np.dot(fp, rep))
+            if sim > best_sim:
+                best_sim = sim
+                best_g = g_idx
+        if best_g != -1 and best_sim >= similarity_threshold:
+            group_ids[i] = best_g
+            # Update running centroid smoothly
+            merged = group_reps[best_g] + fp
+            group_reps[best_g] = merged / (float(np.linalg.norm(merged)) + 1e-6)
+        else:
+            group_ids[i] = len(group_reps)
+            group_reps.append(fp.copy())
+
+    return group_ids
+
+
+def build_carousel_plan_local(
+    images_rgb: List[np.ndarray],
+    carousel_vibe: str = "one_night_out",
+    auto_tilt: bool = True,
+    auto_flash_cast: bool = True,
+    vary_per_slide: bool = True,
+    seed_offset: int = 0,
+) -> List[Dict[str, Any]]:
+    """Build a cohesive per-slide recipe list where same-photoshoot slides share one consistent look."""
+    from .presets import get_builtin_preset
+
+    group_ids = cluster_carousel_scenes(images_rgb)
+    analyses = [
+        analyze_and_build_auto_config(
+            img,
+            strength=1.0,
+            auto_tilt=auto_tilt,
+            auto_flash_cast=auto_flash_cast,
+        )
+        for img in images_rgb
+    ]
+
+    # Pick ONE canonical camera/lighting recipe per scene_group so matching photos look shot on the same camera!
+    group_base_cfg: Dict[int, PipelineConfig] = {}
+    group_label: Dict[int, str] = {}
+
+    for idx, (gid, an) in enumerate(zip(group_ids, analyses)):
+        if gid in group_base_cfg:
+            continue
+
+        cfg = PipelineConfig.from_dict(an.config.to_dict())
+
+        # Gentle carousel-vibe shaping (only when compatible with the actual photo lighting!)
+        if carousel_vibe == "3am_dump" and an.archetype in ("flash_party", "dark_night_moody", "warm_night"):
+            p = get_builtin_preset("3am_night_zoom")
+            cfg = PipelineConfig.from_dict(p.to_dict())
+            if auto_flash_cast:
+                cfg.stage3_optics.flash_falloff = 0.42
+                cfg.stage3_optics.bar_shadow_cast = 0.56
+        elif carousel_vibe == "daylight_casual" and an.archetype in ("daylight_street", "indoor_candid"):
+            cfg.stage3_optics.flash_falloff = 0.0
+            cfg.stage3_optics.bar_shadow_cast = 0.0
+            cfg.stage3_optics.haze_lift = min(cfg.stage3_optics.haze_lift, 0.05)
+
+        group_base_cfg[gid] = cfg.validated()
+        group_label[gid] = f"Scene {gid + 1} · {an.archetype_label}"
+
+    # Assign cohesive configs per slide:
+    # - Same scene_group => IDENTICAL base look, flash_falloff, bar_shadow_cast, glow, grain!
+    # - Tiny natural per-shot variation ONLY in shake seed & small organic tilt delta (±0.5°) so it looks like
+    #   two sequential photos taken 10 seconds apart on the same iPhone — NOT two totally different filters!
+    seen_in_group: Dict[int, int] = {}
+    plan: List[Dict[str, Any]] = []
+
+    tilt_pool = [-2.1, 1.7, -1.5, 2.3, -1.9, 1.4]
+    for idx, (gid, an) in enumerate(zip(group_ids, analyses)):
+        occ = seen_in_group.get(gid, 0)
+        seen_in_group[gid] = occ + 1
+
+        cfg = PipelineConfig.from_dict(group_base_cfg[gid].to_dict())
+        # Keep each individual slide's own detected focal anchor & framing
+        cfg.stage1_focus.focus_center_x = an.subject_center[0]
+        cfg.stage1_focus.focus_center_y = an.subject_center[1]
+        if an.scene_role == "non_face_object":
+            cfg.stage1_focus.falloff_mode = "edges"
+
+        slide_seed = int(an.config.stage2_motion.seed + seed_offset + idx * 71)
+        cfg.stage2_motion.seed = slide_seed
+        cfg.stage4_grain.seed = slide_seed + 19
+        cfg.stage5_compression.framing_seed = slide_seed + 37
+
+        if auto_tilt:
+            base_tilt = tilt_pool[(gid + seed_offset) % len(tilt_pool)]
+            # Sequential shots in the same photoshoot get a tiny natural wrist shift (±0.5°), NOT wild flip
+            jitter = ((occ % 3) - 1) * 0.45 if vary_per_slide else 0.0
+            cfg.stage5_compression.tilt_angle = float(np.clip(base_tilt + jitter, -3.5, 3.5))
+            cfg.stage5_compression.crop_offset = 0.26 if an.archetype != "indoor_candid" else 0.16
+        else:
+            cfg.stage5_compression.tilt_angle = 0.0
+            cfg.stage5_compression.crop_offset = 0.0
+
+        if not auto_flash_cast:
+            cfg.stage3_optics.flash_falloff = 0.0
+            cfg.stage3_optics.bar_shadow_cast = 0.0
+
+        plan.append({
+            "index": idx,
+            "scene_group": f"scene_{gid + 1}",
+            "scene_group_label": group_label[gid],
+            "scene_role": an.scene_role,
+            "archetype_label": an.archetype_label,
+            "summary": an.plain_summary,
+            "config": cfg.validated(),
+        })
+
+    return plan

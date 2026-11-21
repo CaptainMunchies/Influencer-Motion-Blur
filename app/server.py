@@ -15,6 +15,7 @@ import threading
 import time
 import uuid
 import webbrowser
+import zipfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -33,6 +34,8 @@ from engine import (
     VisionDirectorConfig,
     analyze_and_build_auto_config,
     apply_director_guidance_to_config,
+    build_carousel_plan_local,
+    direct_carousel_with_ai,
     direct_photo_with_ai,
     list_available_vision_models,
     list_builtin_presets,
@@ -88,8 +91,8 @@ class UploadedPhoto:
 # In-memory session stores (lightweight, single-user desktop studio)
 PHOTOS: Dict[str, UploadedPhoto] = {}
 RENDER_CACHE: Dict[str, bytes] = {}
-MAX_PHOTOS = 8
-MAX_RENDER_CACHE = 80
+MAX_PHOTOS = 24
+MAX_RENDER_CACHE = 160
 
 
 def _prune_caches() -> None:
@@ -266,6 +269,26 @@ class AIModelsRequest(BaseModel):
     api_key: str = "__KEEP__"
 
 
+class DumpProcessRequest(BaseModel):
+    image_ids: List[str] = Field(min_length=1, max_length=12)
+    carousel_vibe: str = "one_night_out"
+    auto_tilt: bool = True
+    auto_flash_cast: bool = True
+    vary_per_slide: bool = True
+    use_ai_vision: bool = True
+    seed_offset: int = 0
+
+
+class DumpExportSlide(BaseModel):
+    image_id: str
+    config: Dict[str, Any]
+    brush_data_url: Optional[str] = None
+
+
+class DumpExportZipRequest(BaseModel):
+    slides: List[DumpExportSlide] = Field(min_length=1, max_length=12)
+
+
 # ---------- API Routes ----------
 
 @app.get("/api/health")
@@ -404,6 +427,7 @@ def ai_direct_photo(req: AIDirectRequest) -> Dict[str, Any]:
     return {
         "image_id": req.image_id,
         "scene_summary": director_res.scene_summary,
+        "scene_role": director_res.scene_role,
         "model_used": director_res.model_used,
         "provider_used": director_res.provider_used,
         "focus_center": list(director_res.focus_center),
@@ -592,6 +616,7 @@ def auto_process_preview(req: AutoProcessRequest) -> Dict[str, Any]:
             "archetype": analysis.archetype,
             "archetype_label": analysis.archetype_label,
             "plain_summary": analysis.plain_summary,
+            "scene_role": analysis.scene_role,
             "subject_center": list(analysis.subject_center),
             "existing_sharpness": round(analysis.existing_sharpness, 1),
             "sharpness_scale": round(analysis.sharpness_scale, 2),
@@ -718,6 +743,205 @@ def download_full_res(req: ProcessRequest) -> Response:
         content=buf.getvalue(),
         media_type="image/jpeg",
         headers={"Content-Disposition": f'attachment; filename="{out_name}"'},
+    )
+
+
+@app.post("/api/dump/upload")
+async def upload_dump_photos(files: List[UploadFile] = File(...)) -> Dict[str, Any]:
+    """Upload multiple photos at once for Batch Photo Dump carousel processing."""
+    if not files:
+        raise HTTPException(status_code=400, detail="Please choose at least one photo.")
+    uploaded = []
+    for file in files[:12]:
+        raw = await file.read()
+        if not raw:
+            continue
+        try:
+            pil = Image.open(io.BytesIO(raw))
+            pil = ImageOps.exif_transpose(pil).convert("RGB")
+        except Exception:
+            continue
+
+        full_rgb = np.array(pil, dtype=np.uint8)
+        fh, fw = full_rgb.shape[:2]
+        long_edge = max(fw, fh)
+        if long_edge > PREVIEW_MAX_LONG_EDGE:
+            scale = PREVIEW_MAX_LONG_EDGE / float(long_edge)
+            pw = max(64, int(round(fw * scale)))
+            ph = max(64, int(round(fh * scale)))
+            preview_rgb = np.array(pil.resize((pw, ph), Image.Resampling.LANCZOS), dtype=np.uint8)
+        else:
+            preview_rgb = full_rgb.copy()
+
+        image_id = uuid.uuid4().hex[:12]
+        initial_analysis = analyze_and_build_auto_config(preview_rgb, strength=1.0)
+        orig_url = _store_render(preview_rgb, quality=94)
+
+        thumb_pil = Image.fromarray(preview_rgb, mode="RGB")
+        thumb_pil.thumbnail((160, 160), Image.Resampling.LANCZOS)
+        thumb_url = _store_render(np.array(thumb_pil, dtype=np.uint8), quality=82)
+
+        PHOTOS[image_id] = UploadedPhoto(
+            image_id=image_id,
+            filename=file.filename or f"slide_{len(uploaded) + 1}.jpg",
+            full_rgb=full_rgb,
+            preview_rgb=preview_rgb,
+            subject_center=initial_analysis.subject_center,
+            original_url=orig_url,
+            thumb_url=thumb_url,
+        )
+        ph, pw = preview_rgb.shape[:2]
+        uploaded.append({
+            "image_id": image_id,
+            "filename": file.filename or f"slide_{len(uploaded) + 1}.jpg",
+            "full_width": fw,
+            "full_height": fh,
+            "preview_width": pw,
+            "preview_height": ph,
+            "subject_center": list(initial_analysis.subject_center),
+            "scene_role": initial_analysis.scene_role,
+            "original_url": orig_url,
+            "thumb_url": thumb_url,
+        })
+
+    _prune_caches()
+    if not uploaded:
+        raise HTTPException(status_code=400, detail="Could not read any of the uploaded photos.")
+    return {"slides": uploaded}
+
+
+@app.post("/api/dump/process")
+def process_photo_dump(req: DumpProcessRequest) -> Dict[str, Any]:
+    """Process a multi-slide Photo Dump with same-scene cohesion (Vision LLM + local fallback)."""
+    photos: List[UploadedPhoto] = []
+    for img_id in req.image_ids:
+        p = PHOTOS.get(img_id)
+        if p is not None:
+            photos.append(p)
+    if not photos:
+        raise HTTPException(status_code=404, detail="Photo Dump session expired. Please drop your photos again.")
+
+    t_all = time.perf_counter()
+    imgs = [p.preview_rgb for p in photos]
+    used_ai = False
+    ai_model = ""
+    carousel_summary = ""
+    plan: Optional[List[Dict[str, Any]]] = None
+
+    if req.use_ai_vision:
+        v_cfg = _load_vision_settings()
+        if v_cfg.api_key:
+            try:
+                ai_res = direct_carousel_with_ai(
+                    images_rgb=imgs,
+                    director_cfg=v_cfg,
+                    carousel_vibe=req.carousel_vibe,
+                    auto_tilt=req.auto_tilt,
+                    auto_flash_cast=req.auto_flash_cast,
+                    vary_per_slide=req.vary_per_slide,
+                    seed_offset=req.seed_offset,
+                )
+                plan = ai_res["slides"]
+                carousel_summary = ai_res["carousel_summary"]
+                ai_model = ai_res["model_used"]
+                used_ai = True
+            except Exception as exc:
+                carousel_summary = f"Local scene clustering matched your carousel (Vision AI note: {exc})"
+
+    if plan is None:
+        plan = build_carousel_plan_local(
+            images_rgb=imgs,
+            carousel_vibe=req.carousel_vibe,
+            auto_tilt=req.auto_tilt,
+            auto_flash_cast=req.auto_flash_cast,
+            vary_per_slide=req.vary_per_slide,
+            seed_offset=req.seed_offset,
+        )
+        unique_groups = len({item["scene_group"] for item in plan})
+        if not carousel_summary:
+            carousel_summary = (
+                f"Matched {len(plan)} slides across {unique_groups} distinct scene"
+                f"{'s' if unique_groups != 1 else ''} — photos from the same setting share one consistent camera look."
+            )
+
+    cloud_cfg = _load_cloud_settings()
+    out_slides = []
+    for photo, item in zip(photos, plan):
+        cfg = item["config"]
+        res = run_pipeline(
+            image=photo.preview_rgb,
+            config=cfg,
+            cloud_config=cloud_cfg,
+            return_intermediates=False,
+        )
+        preview_url = _store_render(res.final, quality=94)
+        photo.last_look = item["scene_group_label"]
+        photo.last_ms = float(res.total_ms)
+        fh, fw = photo.full_rgb.shape[:2]
+        out_slides.append({
+            "image_id": photo.image_id,
+            "filename": photo.filename,
+            "original_url": photo.original_url,
+            "preview_url": preview_url,
+            "scene_group": item["scene_group"],
+            "scene_group_label": item["scene_group_label"],
+            "scene_role": item["scene_role"],
+            "archetype_label": item["archetype_label"],
+            "summary": item["summary"],
+            "full_width": fw,
+            "full_height": fh,
+            "total_ms": res.total_ms,
+            "config": cfg.to_dict(),
+        })
+
+    return {
+        "carousel_summary": carousel_summary,
+        "used_ai_vision": used_ai,
+        "ai_model": ai_model,
+        "total_ms": round((time.perf_counter() - t_all) * 1000.0, 2),
+        "slides": out_slides,
+    }
+
+
+@app.post("/api/dump/export-zip")
+def export_photo_dump_zip(req: DumpExportZipRequest) -> Response:
+    """Render every Photo Dump slide at full original resolution and return a numbered carousel ZIP."""
+    cloud_cfg = _load_cloud_settings()
+    zip_buf = io.BytesIO()
+    written = 0
+
+    with zipfile.ZipFile(zip_buf, mode="w", compression=zipfile.ZIP_STORED) as zf:
+        for idx, slide in enumerate(req.slides, start=1):
+            photo = PHOTOS.get(slide.image_id)
+            if photo is None:
+                continue
+            cfg = PipelineConfig.from_dict(slide.config)
+            brush_rgba = _decode_brush_data_url(slide.brush_data_url)
+            res = run_pipeline(
+                image=photo.full_rgb,
+                config=cfg,
+                brush_rgba=brush_rgba,
+                cloud_config=cloud_cfg,
+                return_intermediates=False,
+            )
+            img_buf = io.BytesIO()
+            pil = Image.fromarray(res.final, mode="RGB")
+            if cfg.stage5_compression.enabled:
+                pil.save(img_buf, format="JPEG", quality=int(cfg.stage5_compression.jpeg_quality), subsampling=2)
+            else:
+                pil.save(img_buf, format="JPEG", quality=94, subsampling=0)
+
+            stem = Path(photo.filename).stem or f"slide_{idx}"
+            zf.writestr(f"{idx:02d}_{stem}.jpg", img_buf.getvalue())
+            written += 1
+
+    if written == 0:
+        raise HTTPException(status_code=404, detail="No active slides found to export.")
+
+    return Response(
+        content=zip_buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="photo_dump_carousel.zip"'},
     )
 
 

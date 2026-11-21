@@ -14,10 +14,16 @@ from .ai_director import (
     AIDirectorResult,
     SUGGESTED_MODELS,
     apply_director_guidance_to_config,
+    direct_carousel_with_ai,
     direct_photo_with_ai,
     list_available_vision_models,
 )
-from .auto_scene import AutoSceneAnalysis, analyze_and_build_auto_config
+from .auto_scene import (
+    AutoSceneAnalysis,
+    analyze_and_build_auto_config,
+    build_carousel_plan_local,
+    cluster_carousel_scenes,
+)
 from .masks import UserBrushMask, decode_rgba_brush_mask
 from .pipeline import PipelineResult, auto_process_image, process_image, run_pipeline
 from .presets import (
@@ -61,7 +67,10 @@ __all__ = [
     "analyze_and_build_auto_config",
     "apply_director_guidance_to_config",
     "auto_process_image",
+    "build_carousel_plan_local",
+    "cluster_carousel_scenes",
     "decode_rgba_brush_mask",
+    "direct_carousel_with_ai",
     "direct_photo_with_ai",
     "get_builtin_preset",
     "list_available_vision_models",

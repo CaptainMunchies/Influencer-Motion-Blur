@@ -4,10 +4,12 @@ const STAGE_META = [
   { key: "original", label: "Original", shortLabel: "Original", toggleField: null },
   { key: "stage1", label: "1 · Missed Focus", shortLabel: "1. Focus", toggleField: "s1_enabled" },
   { key: "stage2", label: "2 · Motion & Flash", shortLabel: "2. Motion", toggleField: "s2_enabled" },
-  { key: "stage3", label: "3 · Dirty Lens Glow", shortLabel: "3. Glow", toggleField: "s3_enabled" },
+  { key: "stage3", label: "3 · Optics & Flash", shortLabel: "3. Optics", toggleField: "s3_enabled" },
   { key: "stage4", label: "4 · Nighttime Grain", shortLabel: "4. Grain", toggleField: "s4_enabled" },
-  { key: "stage5", label: "5 · Final Result", shortLabel: "5. Final", toggleField: "s5_enabled" },
+  { key: "stage5", label: "5 · Framing & Finish", shortLabel: "5. Finish", toggleField: "s5_enabled" },
 ];
+
+const SCENE_GROUP_COLORS = ["#F5A623", "#7FD3F4", "#7EE09B", "#D19CF5", "#F28B8F", "#FFD580"];
 
 const SHORT_PRESET_NAMES = {
   flash_party_blur: "Flash Party",
@@ -45,6 +47,7 @@ const state = {
   previewWidth: 0,
   previewHeight: 0,
   subjectCenter: [0.50, 0.34],
+  sceneRole: "portrait",
   presets: { builtin: [], custom: [] },
   activePresetId: "auto",
   config: null,
@@ -57,6 +60,12 @@ const state = {
   showdownZoomed: false,
   showdownResults: null,
   selectedShowdownIdx: 0,
+  // Batch Photo Dump state
+  dumpSlides: [],
+  dumpVibe: "one_night_out",
+  dumpSeedOffset: 0,
+  dumpSummary: "",
+  editingDumpIndex: -1,
   brushMode: "off",
   brushHasStrokes: false,
   showMaskOverlay: false,
@@ -113,20 +122,35 @@ function setDetectionPill(text, tooltip = "") {
   $("detectionPill").title = tooltip || text;
 }
 
+function updateSceneRoleUI() {
+  const isObj = state.sceneRole === "non_face_object";
+  $("objectModePill").classList.toggle("hidden", !isObj);
+  $("legendGreenPill").textContent = isObj ? "Green = Hero Subject" : "Green = Sharp Face";
+  $("legendRedPill").textContent = isObj ? "Red = Soft Corners" : "Red = Moving Hands";
+}
+
 // ---------- Top Bar & Screen Routing ----------
 function updateTopbarMode() {
+  const isDump = !state.showingHome && state.activeTab === "dump";
   const hasPhoto = Boolean(state.imageId) && !state.showingHome;
   const isShowdown = hasPhoto && state.activeTab === "showdown";
   const isStudio = hasPhoto && state.activeTab === "qa";
+  const hasDumpSlides = state.dumpSlides.length > 0;
+  const activeWorkspace = isDump || hasPhoto;
 
-  $("visionReadyPill").classList.toggle("hidden", hasPhoto);
-  $("fileMetaBar").classList.toggle("hidden", !hasPhoto);
-  $("newPhotoBtn").classList.toggle("hidden", !hasPhoto);
+  $("visionReadyPill").classList.toggle("hidden", activeWorkspace);
+  $("fileMetaBar").classList.toggle("hidden", !activeWorkspace);
+  $("backToDumpBtn").classList.toggle("hidden", !(isStudio && state.editingDumpIndex >= 0));
+  $("newPhotoBtn").classList.toggle("hidden", !(hasPhoto && !isDump && state.editingDumpIndex < 0));
+  $("addDumpSlidesBtn").classList.toggle("hidden", !isDump);
   $("toggleAdvancedBtn").classList.toggle("hidden", !isStudio);
-  $("downloadBtn").classList.toggle("hidden", !hasPhoto);
-  $("downloadBtn").disabled = !hasPhoto;
+  $("downloadBtn").classList.toggle("hidden", !(hasPhoto || (isDump && hasDumpSlides)));
+  $("downloadBtn").disabled = isDump ? !hasDumpSlides : !hasPhoto;
 
-  if (hasPhoto) {
+  if (isDump) {
+    $("fileNameLabel").textContent = "Photo Dump Carousel";
+    $("downloadBtn").textContent = "Export All (ZIP)";
+  } else if (hasPhoto) {
     $("fileNameLabel").textContent = state.filename || "photo.jpg";
     $("downloadBtn").textContent = isShowdown ? "Export Winner" : "Export Full-Res";
   }
@@ -135,7 +159,7 @@ function updateTopbarMode() {
   $("toggleAdvancedLabel").textContent = state.advancedOpen ? "Close Fine-Tune" : "Fine-Tune";
 
   document.querySelectorAll(".tab-btn").forEach((b) => {
-    const isAct = hasPhoto ? b.dataset.tab === state.activeTab : b.dataset.tab === "qa";
+    const isAct = activeWorkspace ? b.dataset.tab === state.activeTab : b.dataset.tab === "qa";
     b.classList.toggle("active", isAct);
     b.setAttribute("aria-selected", String(isAct));
   });
@@ -143,15 +167,30 @@ function updateTopbarMode() {
 
 function showHomeScreen() {
   state.showingHome = true;
+  state.editingDumpIndex = -1;
   $("emptyState").classList.remove("hidden");
   $("tab-qa").classList.add("hidden");
   $("tab-showdown").classList.add("hidden");
+  $("tab-dump").classList.add("hidden");
   updateTopbarMode();
   loadRecentPhotos();
 }
 
 function switchTab(tab) {
   state.activeTab = tab;
+
+  if (tab === "dump") {
+    state.showingHome = false;
+    state.editingDumpIndex = -1;
+    $("emptyState").classList.add("hidden");
+    $("tab-qa").classList.add("hidden");
+    $("tab-showdown").classList.add("hidden");
+    $("tab-dump").classList.remove("hidden");
+    updateTopbarMode();
+    renderDumpGrid();
+    return;
+  }
+
   if (!state.imageId) {
     showHomeScreen();
     if (tab === "showdown") showToast("Drop a photo first to compare looks in Showdown.");
@@ -160,6 +199,7 @@ function switchTab(tab) {
 
   state.showingHome = false;
   $("emptyState").classList.add("hidden");
+  $("tab-dump").classList.add("hidden");
   $("tab-qa").classList.toggle("hidden", tab !== "qa");
   $("tab-showdown").classList.toggle("hidden", tab !== "showdown");
   updateTopbarMode();
@@ -456,6 +496,8 @@ function syncControlsFromConfig() {
   $("s2_direction_angle").value = Math.round(c.stage2_motion.direction_angle);
 
   $("s3_enabled").checked = c.stage3_optics.enabled;
+  $("s3_flash_falloff").value = Math.round((c.stage3_optics.flash_falloff || 0) * 100);
+  $("s3_bar_shadow_cast").value = Math.round((c.stage3_optics.bar_shadow_cast || 0) * 100);
   $("s3_glow_amount").value = Math.round(c.stage3_optics.glow_amount * 100);
   $("s3_haze_lift").value = Math.round(c.stage3_optics.haze_lift * 100);
   $("s3_warmth").value = Math.round(c.stage3_optics.warmth * 100);
@@ -469,6 +511,8 @@ function syncControlsFromConfig() {
   $("s4_night_cast").value = Math.round((c.stage4_grain.night_cast || 0) * 100);
 
   $("s5_enabled").checked = c.stage5_compression.enabled;
+  $("s5_tilt_angle").value = Number(c.stage5_compression.tilt_angle || 0).toFixed(1);
+  $("s5_crop_offset").value = Math.round((c.stage5_compression.crop_offset || 0) * 100);
   $("s5_insta_softness").value = Math.round(c.stage5_compression.insta_softness * 100);
   $("s5_jpeg_quality").value = Math.round(c.stage5_compression.jpeg_quality);
 
@@ -495,6 +539,8 @@ function readControlsIntoConfig() {
   c.stage2_motion.direction_angle = parseFloat($("s2_direction_angle").value);
 
   c.stage3_optics.enabled = $("s3_enabled").checked;
+  c.stage3_optics.flash_falloff = parseFloat($("s3_flash_falloff").value) / 100.0;
+  c.stage3_optics.bar_shadow_cast = parseFloat($("s3_bar_shadow_cast").value) / 100.0;
   c.stage3_optics.glow_amount = parseFloat($("s3_glow_amount").value) / 100.0;
   c.stage3_optics.haze_lift = parseFloat($("s3_haze_lift").value) / 100.0;
   c.stage3_optics.warmth = parseFloat($("s3_warmth").value) / 100.0;
@@ -508,6 +554,8 @@ function readControlsIntoConfig() {
   c.stage4_grain.night_cast = parseFloat($("s4_night_cast").value) / 100.0;
 
   c.stage5_compression.enabled = $("s5_enabled").checked;
+  c.stage5_compression.tilt_angle = parseFloat($("s5_tilt_angle").value);
+  c.stage5_compression.crop_offset = parseFloat($("s5_crop_offset").value) / 100.0;
   c.stage5_compression.insta_softness = parseFloat($("s5_insta_softness").value) / 100.0;
   c.stage5_compression.jpeg_quality = parseInt($("s5_jpeg_quality").value, 10);
 
@@ -536,6 +584,8 @@ function updateControlReadoutsAndVisibility() {
   $("wrap_s2_ghost").classList.toggle("hidden", method === "cloud_ai");
   $("wrap_s2_angle").classList.toggle("hidden", method === "cloud_ai" || method === "pivot_swing");
 
+  $("val_s3_flash_falloff").textContent = `${$("s3_flash_falloff").value}%`;
+  $("val_s3_bar_cast").textContent = `${$("s3_bar_shadow_cast").value}%`;
   $("val_s3_glow").textContent = `${$("s3_glow_amount").value}%`;
   $("val_s3_haze").textContent = `${$("s3_haze_lift").value}%`;
   $("val_s3_warmth").textContent = `${$("s3_warmth").value}%`;
@@ -547,6 +597,9 @@ function updateControlReadoutsAndVisibility() {
   $("val_s4_zoom").textContent = `${$("s4_digital_zoom").value}%`;
   $("val_s4_cast").textContent = `${$("s4_night_cast").value}%`;
 
+  const tiltVal = parseFloat($("s5_tilt_angle").value);
+  $("val_s5_tilt").textContent = `${tiltVal > 0 ? "+" : ""}${tiltVal.toFixed(1)}°`;
+  $("val_s5_crop").textContent = `${$("s5_crop_offset").value}%`;
   $("val_s5_soft").textContent = `${$("s5_insta_softness").value}%`;
   $("val_s5_qual").textContent = $("s5_jpeg_quality").value;
 
@@ -658,6 +711,8 @@ async function runAutoMatch(useVisionAI = false) {
     if (!resp.ok) throw new Error(data.detail || "Auto-match failed");
 
     state.autoAnalysis = data.analysis;
+    state.sceneRole = data.analysis?.scene_role || "portrait";
+    updateSceneRoleUI();
     state.config = data.config;
     state.stages = data.stages;
     state.selectedStage = "stage5";
@@ -1062,6 +1117,10 @@ async function runAIAutoPaint() {
     }
 
     state.config = data.config;
+    if (data.scene_role) {
+      state.sceneRole = data.scene_role;
+      updateSceneRoleUI();
+    }
     if (data.focus_center) state.subjectCenter = data.focus_center;
     syncControlsFromConfig();
     state.stages = data.stages;
@@ -1384,8 +1443,299 @@ function renderShowdownGrid(data) {
   bindShowdownSyncedPanning();
 }
 
-// ---------- Export Full-Resolution / Export Winner ----------
+// ---------- Screen 05: Batch Photo Dump Carousel ----------
+async function uploadDumpFiles(fileList, append = false) {
+  const files = Array.from(fileList || []).filter((f) => f && f.type && f.type.startsWith("image/"));
+  if (!files.length) return;
+
+  const form = new FormData();
+  for (const f of files.slice(0, 12)) {
+    form.append("files", f);
+  }
+
+  state.activeTab = "dump";
+  state.showingHome = false;
+  $("emptyState").classList.add("hidden");
+  $("tab-qa").classList.add("hidden");
+  $("tab-showdown").classList.add("hidden");
+  $("tab-dump").classList.remove("hidden");
+  updateTopbarMode();
+
+  $("dumpGrid").innerHTML = `<div class="showdown-loading"><div class="spinner"></div><span>Uploading ${files.length} photo${files.length > 1 ? "s" : ""}…</span></div>`;
+  setStatus(`Uploading ${files.length}…`);
+
+  try {
+    const resp = await fetch("/api/dump/upload", { method: "POST", body: form });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || "Batch upload failed");
+    }
+    const data = await resp.json();
+    const newSlides = (data.slides || []).map((s) => ({
+      ...s,
+      preview_url: s.original_url,
+      scene_group: "scene_1",
+      scene_group_label: "Pending",
+      archetype_label: "Auto-Match",
+      summary: "",
+      config: null,
+    }));
+
+    state.dumpSlides = append ? [...state.dumpSlides, ...newSlides].slice(0, 12) : newSlides;
+    state.dumpSeedOffset = 0;
+    await refreshVisionPill();
+    const useAi = state.autoRunVision && state.visionHasKey;
+    await runPhotoDump(useAi);
+  } catch (err) {
+    setStatus("Upload error");
+    showToast(err.message || "Could not upload photos.");
+    renderDumpGrid();
+  }
+}
+
+async function runPhotoDump(useAiVision = false) {
+  if (!state.dumpSlides.length) {
+    renderDumpGrid();
+    return;
+  }
+
+  $("dumpGrid").innerHTML = `<div class="showdown-loading"><div class="spinner"></div><span>${
+    useAiVision
+      ? "Vision AI grouping matching scenes & directing carousel…"
+      : "Grouping matching scenes & rendering carousel…"
+  }</span></div>`;
+  state.isProcessing = true;
+  setStatus(useAiVision ? "AI Directing…" : "Processing Dump…");
+
+  try {
+    const resp = await fetch("/api/dump/process", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        image_ids: state.dumpSlides.map((s) => s.image_id),
+        carousel_vibe: state.dumpVibe,
+        auto_tilt: $("dumpAutoTiltCheck").checked,
+        auto_flash_cast: $("dumpAutoFlashCheck").checked,
+        vary_per_slide: $("dumpVarySlideCheck").checked,
+        use_ai_vision: Boolean(useAiVision),
+        seed_offset: state.dumpSeedOffset,
+      }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.detail || "Photo Dump processing failed");
+
+    // Preserve preview dimensions from uploaded records when merging processed slide output
+    const prevById = new Map(state.dumpSlides.map((s) => [s.image_id, s]));
+    state.dumpSlides = (data.slides || []).map((s) => ({
+      ...(prevById.get(s.image_id) || {}),
+      ...s,
+    }));
+    state.dumpSummary = data.carousel_summary || "";
+    $("dumpSummaryText").textContent = state.dumpSummary;
+
+    state.isProcessing = false;
+    const sec = (data.total_ms / 1000).toFixed(1);
+    setStatus(`${state.dumpSlides.length} slides · ${sec}s`);
+    updateTopbarMode();
+    renderDumpGrid();
+  } catch (err) {
+    state.isProcessing = false;
+    setStatus("Error");
+    showToast(err.message || "Photo Dump failed", 3800);
+    renderDumpGrid();
+  }
+}
+
+function renderDumpGrid() {
+  const grid = $("dumpGrid");
+  grid.innerHTML = "";
+
+  if (!state.dumpSlides.length) {
+    grid.innerHTML = `
+      <div class="dump-empty">
+        <h3>Drop 2&ndash;12 photos to build a Photo Dump</h3>
+        <p>Photos from the same shoot or room automatically share one consistent camera look, lighting &amp; color cast, while different scenes (including non-face table/drinks shots) adapt naturally.</p>
+        <label class="btn btn-amber btn-lg" for="dumpFileInput">Select Carousel Photos</label>
+      </div>
+    `;
+    updateTopbarMode();
+    return;
+  }
+
+  // Assign a consistent accent dot color per distinct scene_group so same-photoshoot slides visually match!
+  const groupColorMap = new Map();
+  let colorIdx = 0;
+  for (const s of state.dumpSlides) {
+    const g = s.scene_group || "scene_1";
+    if (!groupColorMap.has(g)) {
+      groupColorMap.set(g, SCENE_GROUP_COLORS[colorIdx % SCENE_GROUP_COLORS.length]);
+      colorIdx++;
+    }
+  }
+
+  state.dumpSlides.forEach((slide, idx) => {
+    const isObj = slide.scene_role === "non_face_object";
+    const gColor = groupColorMap.get(slide.scene_group || "scene_1") || "#F5A623";
+    const cfg = slide.config || {};
+    const opt = cfg.stage3_optics || {};
+    const fin = cfg.stage5_compression || {};
+    const flashPct = Math.round((opt.flash_falloff || 0) * 100);
+    const castPct = Math.round((opt.bar_shadow_cast || 0) * 100);
+    const tiltVal = Number(fin.tilt_angle || 0);
+    const tiltTxt = Math.abs(tiltVal) >= 0.05 ? `${tiltVal > 0 ? "+" : ""}${tiltVal.toFixed(1)}° Tilt` : "Level";
+    const numStr = String(idx + 1).padStart(2, "0");
+
+    const card = document.createElement("div");
+    card.className = "dump-card" + (isObj ? " object-card" : "");
+    card.innerHTML = `
+      <div class="dump-card-head">
+        <div class="dump-card-titles">
+          <div class="dump-card-title"></div>
+          <div class="dump-card-sub"></div>
+        </div>
+        <div class="dump-badges">
+          <span class="role-badge ${isObj ? "role-object" : "role-portrait"}">${isObj ? "NO FACE · OBJECT" : "PORTRAIT"}</span>
+        </div>
+      </div>
+      <div class="scene-group-chip" title="Slides with the same Scene Group share one camera look &amp; lighting">
+        <span class="scene-group-dot" style="background:${gColor}"></span>
+        <span class="scene-group-text"></span>
+      </div>
+      <div class="dump-img-wrap">
+        <img src="${slide.preview_url || slide.original_url}" alt="" draggable="false" />
+      </div>
+      <div class="dump-card-foot">
+        <span class="showdown-time">Flash ${flashPct}% · Cast ${castPct}%</span>
+        <div class="dump-card-actions">
+          <button type="button" class="btn btn-surface open-studio-btn">Open in Studio</button>
+          <button type="button" class="dump-del-btn" title="Remove slide">&times;</button>
+        </div>
+      </div>
+    `;
+    card.querySelector(".dump-card-title").textContent = `${numStr} · ${slide.filename}`;
+    card.querySelector(".dump-card-sub").textContent = `${slide.archetype_label || "Auto"} · ${tiltTxt}`;
+    card.querySelector(".scene-group-text").textContent = slide.scene_group_label || "Scene 1";
+
+    card.querySelector(".open-studio-btn").addEventListener("click", () => openDumpSlideInStudio(idx));
+    card.querySelector(".dump-del-btn").addEventListener("click", () => {
+      state.dumpSlides.splice(idx, 1);
+      renderDumpGrid();
+      updateTopbarMode();
+    });
+
+    grid.appendChild(card);
+  });
+
+  updateTopbarMode();
+}
+
+async function openDumpSlideInStudio(idx) {
+  const slide = state.dumpSlides[idx];
+  if (!slide) return;
+
+  try {
+    const resp = await fetch(`/api/photos/${encodeURIComponent(slide.image_id)}`);
+    if (!resp.ok) throw new Error("Slide session expired.");
+    const info = await resp.json();
+
+    state.editingDumpIndex = idx;
+    state.imageId = info.image_id;
+    state.originalUrl = info.original_url;
+    state.filename = info.filename;
+    state.fullWidth = info.full_width;
+    state.fullHeight = info.full_height;
+    state.previewWidth = info.preview_width;
+    state.previewHeight = info.preview_height;
+    state.subjectCenter = info.subject_center || [0.5, 0.34];
+    state.sceneRole = slide.scene_role || "portrait";
+    updateSceneRoleUI();
+
+    state.autoMode = false;
+    state.activePresetId = "";
+    state.selectedStage = "stage5";
+    state.config = slide.config ? deepClone(slide.config) : state.config;
+    syncControlsFromConfig();
+    renderPresetBar();
+
+    $("origImg").src = info.original_url;
+    $("wipeBeforeImg").src = info.original_url;
+    initBrushCanvases(info.preview_width, info.preview_height);
+
+    state.activeTab = "qa";
+    state.showingHome = false;
+    $("emptyState").classList.add("hidden");
+    $("tab-dump").classList.add("hidden");
+    $("tab-showdown").classList.add("hidden");
+    $("tab-qa").classList.remove("hidden");
+    setDetectionPill(
+      `${slide.scene_group_label || "Carousel Slide"} · ${slide.summary || "Editing slide in Studio"}`,
+      slide.summary || ""
+    );
+    updateTopbarMode();
+    await processCurrentPhoto();
+  } catch (err) {
+    showToast(err.message || "Could not open slide in Studio.");
+  }
+}
+
+function saveStudioBackToDump() {
+  if (state.editingDumpIndex >= 0 && state.dumpSlides[state.editingDumpIndex]) {
+    readControlsIntoConfig();
+    const s = state.dumpSlides[state.editingDumpIndex];
+    s.config = deepClone(state.config);
+    s.scene_role = state.sceneRole;
+    if (state.stages.stage5) {
+      s.preview_url = state.stages.stage5;
+    }
+    showToast(`Saved changes to slide ${state.editingDumpIndex + 1}`);
+  }
+  state.editingDumpIndex = -1;
+  switchTab("dump");
+}
+
+async function exportDumpZip() {
+  if (!state.dumpSlides.length) return;
+  const btn = $("downloadBtn");
+  const prev = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Zipping Full-Res…";
+
+  try {
+    const resp = await fetch("/api/dump/export-zip", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        slides: state.dumpSlides.map((s) => ({
+          image_id: s.image_id,
+          config: s.config || state.config || {},
+        })),
+      }),
+    });
+    if (!resp.ok) throw new Error("Could not export ZIP");
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "photo_dump_carousel.zip";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    showToast(`Exported ${state.dumpSlides.length} full-res slides in ZIP!`);
+  } catch (err) {
+    showToast(err.message || "ZIP export failed");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = prev;
+  }
+}
+
+// ---------- Export Full-Resolution / Export Winner / Export ZIP ----------
 async function downloadFinalResult() {
+  if (state.activeTab === "dump") {
+    await exportDumpZip();
+    return;
+  }
   if (!state.imageId || !state.config) return;
 
   let exportCfg = state.config;
@@ -1578,11 +1928,25 @@ function bindEvents() {
   });
 
   $("fileInput").addEventListener("change", (e) => {
-    if (e.target.files && e.target.files[0]) {
+    if (e.target.files && e.target.files.length > 1) {
+      uploadDumpFiles(e.target.files, false);
+      e.target.value = "";
+    } else if (e.target.files && e.target.files[0]) {
+      state.editingDumpIndex = -1;
       uploadFile(e.target.files[0]);
       e.target.value = "";
     }
   });
+
+  $("dumpFileInput").addEventListener("change", (e) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const append = state.activeTab === "dump" && state.dumpSlides.length > 0;
+      uploadDumpFiles(e.target.files, append);
+      e.target.value = "";
+    }
+  });
+
+  $("backToDumpBtn").addEventListener("click", saveStudioBackToDump);
 
   const dz = $("dropzone");
   ["dragenter", "dragover"].forEach((ev) => {
@@ -1598,9 +1962,12 @@ function bindEvents() {
     });
   });
   document.body.addEventListener("drop", (e) => {
-    const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-    if (file && file.type.startsWith("image/")) {
-      uploadFile(file);
+    const imgs = Array.from(e.dataTransfer?.files || []).filter((f) => f.type && f.type.startsWith("image/"));
+    if (imgs.length > 1 || (imgs.length >= 1 && state.activeTab === "dump")) {
+      uploadDumpFiles(imgs, state.activeTab === "dump" && state.dumpSlides.length > 0);
+    } else if (imgs.length === 1) {
+      state.editingDumpIndex = -1;
+      uploadFile(imgs[0]);
     }
   });
 
@@ -1672,9 +2039,9 @@ function bindEvents() {
     "s2_enabled", "s2_method", "s2_shake_amount", "s2_ghost_strength",
     "s2_flash_sharpness", "s2_outer_smear", "s2_swing_angle", "s2_swing_intensity",
     "s2_direction_angle",
-    "s3_enabled", "s3_glow_amount", "s3_haze_lift", "s3_warmth", "s3_edge_fringing",
+    "s3_enabled", "s3_flash_falloff", "s3_bar_shadow_cast", "s3_glow_amount", "s3_haze_lift", "s3_warmth", "s3_edge_fringing",
     "s4_enabled", "s4_grain_amount", "s4_clumpiness", "s4_isp_smoothing", "s4_digital_zoom", "s4_night_cast",
-    "s5_enabled", "s5_insta_softness", "s5_jpeg_quality",
+    "s5_enabled", "s5_tilt_angle", "s5_crop_offset", "s5_insta_softness", "s5_jpeg_quality",
   ];
   for (const id of controlIds) {
     const el = $(id);
@@ -1682,6 +2049,55 @@ function bindEvents() {
     const ev = el.type === "range" ? "input" : "change";
     el.addEventListener(ev, scheduleAutoProcess);
   }
+
+  $("randomizeFramingBtn").addEventListener("click", () => {
+    if (!state.config) return;
+    const sign = Math.random() < 0.5 ? -1 : 1;
+    const tilt = Number((sign * (1.2 + Math.random() * 1.6)).toFixed(1));
+    const crop = Math.round(20 + Math.random() * 20);
+    state.config.stage5_compression.tilt_angle = tilt;
+    state.config.stage5_compression.crop_offset = crop / 100.0;
+    state.config.stage5_compression.framing_seed = Math.floor(Math.random() * 99999) + 1;
+    syncControlsFromConfig();
+    if (state.imageId) processCurrentPhoto();
+  });
+
+  // Photo Dump controls
+  document.querySelectorAll("#dumpVibeTabs .set-pill").forEach((pill) => {
+    pill.addEventListener("click", () => {
+      state.dumpVibe = pill.dataset.vibe;
+      document.querySelectorAll("#dumpVibeTabs .set-pill").forEach((p) => {
+        p.classList.toggle("active", p === pill);
+      });
+      if (state.dumpSlides.length) runPhotoDump(false);
+    });
+  });
+
+  $("dumpAiDirectBtn").addEventListener("click", async () => {
+    if (!state.dumpSlides.length) {
+      showToast("Add photos to your Photo Dump first.");
+      return;
+    }
+    await refreshVisionPill();
+    if (!state.visionHasKey) {
+      showToast("Add your Kie.ai, Gemini, OpenAI, or OpenRouter API key in Settings first.");
+      await openSettingsModal();
+      return;
+    }
+    await runPhotoDump(true);
+  });
+
+  $("dumpVaryBtn").addEventListener("click", () => {
+    if (!state.dumpSlides.length) return;
+    state.dumpSeedOffset += 137;
+    runPhotoDump(false);
+  });
+
+  ["dumpAutoTiltCheck", "dumpAutoFlashCheck", "dumpVarySlideCheck"].forEach((id) => {
+    $(id).addEventListener("change", () => {
+      if (state.dumpSlides.length) runPhotoDump(false);
+    });
+  });
 
   $("applyBtn").addEventListener("click", () => {
     state.autoMode = false;

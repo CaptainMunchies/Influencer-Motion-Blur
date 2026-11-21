@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/styles.css?v=8" />
+  <link rel="stylesheet" href="/static/styles.css?v=9" />
 </head>
 <body>
   <!-- Unified 52px Matte Instrument Top Bar -->
@@ -30,6 +30,9 @@
         <button class="tab-btn" data-tab="showdown" role="tab" aria-selected="false" type="button">
           Showdown
         </button>
+        <button class="tab-btn" data-tab="dump" role="tab" aria-selected="false" type="button">
+          Photo Dump
+        </button>
       </nav>
 
       <div id="fileMetaBar" class="file-meta hidden">
@@ -45,6 +48,11 @@
         <span id="visionReadyLabel">Local Engine Ready</span>
       </button>
 
+      <!-- Shown when editing a Photo Dump slide inside Studio -->
+      <button id="backToDumpBtn" class="btn btn-surface hidden" type="button" title="Save edits back to your Photo Dump carousel">
+        &larr; Back to Dump
+      </button>
+
       <!-- Shown on Screens 02 / 03 / 04 (Active Photo) -->
       <label id="newPhotoBtn" class="btn btn-surface hidden" for="fileInput" title="Upload a different photo">
         <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true">
@@ -53,6 +61,15 @@
           <line x1="12" y1="3" x2="12" y2="15" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
         </svg>
         <span>New Photo</span>
+      </label>
+
+      <!-- Shown on Screen 05 (Photo Dump) -->
+      <label id="addDumpSlidesBtn" class="btn btn-surface hidden" for="dumpFileInput" title="Add more photos to this Photo Dump carousel">
+        <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true">
+          <line x1="12" y1="5" x2="12" y2="19" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+          <line x1="5" y1="12" x2="19" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+        </svg>
+        <span>Add Slides</span>
       </label>
 
       <button id="toggleAdvancedBtn" class="btn btn-subtle hidden" type="button" title="Open zero-scroll Fine-Tune inspector, AI Mask brush, and 5-stage filmstrip">
@@ -72,6 +89,7 @@
       </button>
 
       <input id="fileInput" type="file" accept="image/jpeg,image/png,image/webp" hidden />
+      <input id="dumpFileInput" type="file" accept="image/jpeg,image/png,image/webp" multiple hidden />
 
       <button id="settingsBtn" class="btn-icon" type="button" title="AI Director &amp; API Settings" aria-label="Settings">
         <svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true">
@@ -94,15 +112,16 @@
           </svg>
         </div>
 
-        <h1>Drop any photo to match its blur</h1>
+        <h1>Drop one photo or a full Photo Dump</h1>
         <p class="dropzone-sub">
-          Auto-Match reads the scene, Vision AI traces faces and moving arms, and our optical engine delivers a believable iPhone shot in one pass.
+          Auto-Match reads faces or non-face scenes, matches lighting &amp; framing, and keeps photos from the same shoot visually consistent.
         </p>
 
         <div class="dropzone-cta-row">
           <label class="btn btn-amber btn-lg" for="fileInput">Choose Photo</label>
-          <span class="dropzone-note">JPG, PNG, or WebP &middot; Zero pixel regeneration</span>
+          <label class="btn btn-surface btn-lg" for="dumpFileInput">Photo Dump (Multi)</label>
         </div>
+        <span class="dropzone-note">JPG, PNG, or WebP &middot; Drag 1 photo for Studio or 2&ndash;12 for Batch Photo Dump</span>
       </div>
 
       <div class="promise-strip">
@@ -151,10 +170,11 @@
             <span id="detectionText">Auto-Match ready</span>
           </div>
 
-          <!-- Screen 03: Mask Color Legend Pills -->
+          <!-- Screen 03: Mask Color Legend Pills (adapts automatically for Portrait vs Non-Face Object) -->
           <div id="maskLegendPills" class="mask-legend hidden">
-            <span class="legend-pill legend-green">Green = Sharp Face</span>
-            <span class="legend-pill legend-red">Red = Moving Hands</span>
+            <span id="objectModePill" class="legend-pill legend-object hidden">No Face &middot; Object Mode</span>
+            <span id="legendGreenPill" class="legend-pill legend-green">Green = Sharp Face</span>
+            <span id="legendRedPill" class="legend-pill legend-red">Red = Moving Hands</span>
           </div>
         </div>
 
@@ -268,9 +288,9 @@
           <div class="step-tabs" role="tablist" aria-label="Pipeline stage">
             <button class="step-tab" data-step="stage1" type="button">1 Focus</button>
             <button class="step-tab active" data-step="stage2" type="button">2 Motion</button>
-            <button class="step-tab" data-step="stage3" type="button">3 Glow</button>
+            <button class="step-tab" data-step="stage3" type="button">3 Optics</button>
             <button class="step-tab" data-step="stage4" type="button">4 Grain</button>
-            <button class="step-tab" data-step="stage5" type="button">5 IG</button>
+            <button class="step-tab" data-step="stage5" type="button">5 Finish</button>
           </div>
 
           <!-- Step 1: Missed Focus -->
@@ -391,16 +411,37 @@
             </div>
           </div>
 
-          <!-- Step 3: Dirty Lens Glow -->
+          <!-- Step 3: Optics, Flash & Bar Cast -->
           <div class="step-pane hidden" data-step-pane="stage3">
             <div class="step-header-row">
-              <h3>3 &middot; Dirty Lens Glow</h3>
-              <label class="amber-switch" title="Turn Dirty Lens Glow on or off">
+              <h3>3 &middot; Optics, Flash &amp; Cast</h3>
+              <label class="amber-switch" title="Turn Optics, Flash &amp; Cast on or off">
                 <input type="checkbox" id="s3_enabled" checked />
                 <span class="amber-switch-track"></span>
               </label>
             </div>
             <div class="step-fields" data-stage-card="stage3">
+              <div class="realism-callout">
+                <div class="realism-callout-head">
+                  <span class="realism-callout-tag">NIGHT LIGHTING REALISM</span>
+                  <span class="realism-callout-sub">AI-Matched</span>
+                </div>
+                <div class="field">
+                  <div class="field-label">
+                    <span>Phone Flash Falloff</span>
+                    <span class="mono-val amber-val" id="val_s3_flash_falloff">0%</span>
+                  </div>
+                  <input type="range" class="amber-range" id="s3_flash_falloff" min="0" max="100" step="1" value="0" />
+                </div>
+                <div class="field">
+                  <div class="field-label">
+                    <span>Dirty Bar Shadow Cast</span>
+                    <span class="mono-val amber-val" id="val_s3_bar_cast">0%</span>
+                  </div>
+                  <input type="range" class="amber-range" id="s3_bar_shadow_cast" min="0" max="100" step="1" value="0" />
+                </div>
+              </div>
+
               <div class="field">
                 <div class="field-label">
                   <span>Dirty Lens Glow</span>
@@ -480,16 +521,40 @@
             </div>
           </div>
 
-          <!-- Step 5: Instagram Polish -->
+          <!-- Step 5: Phone Framing & Instagram Polish -->
           <div class="step-pane hidden" data-step-pane="stage5">
             <div class="step-header-row">
-              <h3>5 &middot; Instagram Polish</h3>
-              <label class="amber-switch" title="Turn Instagram Polish on or off">
+              <h3>5 &middot; Phone Framing &amp; IG</h3>
+              <label class="amber-switch" title="Turn Framing &amp; IG Polish on or off">
                 <input type="checkbox" id="s5_enabled" checked />
                 <span class="amber-switch-track"></span>
               </label>
             </div>
             <div class="step-fields" data-stage-card="stage5">
+              <div class="realism-callout">
+                <div class="realism-callout-head">
+                  <span class="realism-callout-tag">ACCIDENTAL PHONE FRAMING</span>
+                  <span class="realism-callout-sub">Zero Black Edges</span>
+                </div>
+                <div class="field">
+                  <div class="field-label">
+                    <span>Casual Phone Tilt</span>
+                    <span class="mono-val amber-val" id="val_s5_tilt">0.0°</span>
+                  </div>
+                  <input type="range" class="amber-range" id="s5_tilt_angle" min="-4" max="4" step="0.1" value="0" />
+                </div>
+                <div class="field">
+                  <div class="field-label">
+                    <span>Off-Center Crop</span>
+                    <span class="mono-val amber-val" id="val_s5_crop">0%</span>
+                  </div>
+                  <input type="range" class="amber-range" id="s5_crop_offset" min="0" max="100" step="1" value="0" />
+                </div>
+                <button id="randomizeFramingBtn" class="btn btn-surface btn-full" type="button">
+                  Randomize Casual Framing
+                </button>
+              </div>
+
               <div class="field">
                 <div class="field-label">
                   <span>Instagram Softness</span>
@@ -579,6 +644,58 @@
     </div>
 
     <div id="showdownGrid" class="showdown-grid"></div>
+  </main>
+
+  <!-- SCREEN 05: BATCH PHOTO DUMP CAROUSEL -->
+  <main id="tab-dump" class="dump-screen hidden">
+    <div class="showdown-toolbar">
+      <div class="compare-set-group">
+        <span class="dock-label-auto">CAROUSEL VIBE</span>
+        <div id="dumpVibeTabs" class="set-pills">
+          <button class="set-pill active" data-vibe="one_night_out" type="button">One Night Out</button>
+          <button class="set-pill" data-vibe="mixed_week" type="button">Mixed Week</button>
+          <button class="set-pill" data-vibe="3am_dump" type="button">3AM Dump</button>
+          <button class="set-pill" data-vibe="daylight_casual" type="button">Daylight Casual</button>
+        </div>
+      </div>
+
+      <div class="showdown-actions">
+        <button id="dumpAiDirectBtn" class="btn btn-amber-outline" type="button" title="Have Vision AI inspect all slides together so same-shoot photos share one look">
+          <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true">
+            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+          </svg>
+          <span>LLM Auto-Direct All</span>
+        </button>
+        <button id="dumpVaryBtn" class="btn btn-surface" type="button" title="Re-roll subtle tilt &amp; shake seeds while keeping same-scene looks locked together">
+          Vary Tilts &amp; Seeds
+        </button>
+      </div>
+    </div>
+
+    <div id="dumpGrid" class="dump-grid">
+      <!-- Populated dynamically, or shows drop prompt when empty -->
+    </div>
+
+    <footer class="dump-footer">
+      <div class="dump-summary-wrap">
+        <span class="amber-dot"></span>
+        <span id="dumpSummaryText">Drop 2&ndash;12 photos to build a cohesive Photo Dump carousel. Photos from the same setting automatically share one camera look.</span>
+      </div>
+      <div class="dump-toggles">
+        <label class="amber-check">
+          <input id="dumpAutoTiltCheck" type="checkbox" checked />
+          <span>Auto Tilt &amp; Crop</span>
+        </label>
+        <label class="amber-check">
+          <input id="dumpAutoFlashCheck" type="checkbox" checked />
+          <span>Auto Flash &amp; Bar Cast</span>
+        </label>
+        <label class="amber-check">
+          <input id="dumpVarySlideCheck" type="checkbox" checked />
+          <span>Vary Per Slide</span>
+        </label>
+      </div>
+    </footer>
   </main>
 
   <!-- Save Preset Modal -->
@@ -691,6 +808,6 @@
   <!-- Toast Notification -->
   <div id="toast" class="toast hidden"></div>
 
-  <script src="/static/app.js?v=8"></script>
+  <script src="/static/app.js?v=9"></script>
 </body>
 </html>

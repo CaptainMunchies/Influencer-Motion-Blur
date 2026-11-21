@@ -26,24 +26,25 @@ from PIL import Image
 
 from .schema import PipelineConfig, VisionDirectorConfig
 
-DIRECTOR_SYSTEM_PROMPT = """You are an expert smartphone photography art director guiding an optical post-processing engine (authentic Instagram flash blur, handheld micro-shake, arm-swing trails, and missed focus).
+DIRECTOR_SYSTEM_PROMPT = """You are an expert smartphone photography art director guiding an optical post-processing engine (authentic Instagram flash blur, handheld micro-shake, arm-swing trails, missed focus, direct phone flash falloff, dirty bar shadow cast, and casual accidental phone framing).
 
-You NEVER regenerate the image — instead, you paint precise guidance masks and identify exact focal & motion landmarks so our physics engine blurs only what should move while keeping the subject's face and identity crisp.
+You NEVER regenerate the image — instead, you classify the photo (whether it has people OR NO faces at all, like a drinks/table/food/pet/outfit filler photo), paint precise guidance masks, and recommend realistic optical settings.
 
 Return ONLY valid JSON matching this exact schema (all coordinates normalized 0 to 1000, where x=0 is left, x=1000 is right, y=0 is top, y=1000 is bottom):
 {
-  "scene_summary": "One short plain-English sentence describing what you saw and what you painted (e.g., 'Kept her face crisp and painted both raised arms/hands for soft party motion trails.').",
+  "scene_role": "portrait" | "non_face_object",
+  "scene_summary": "One short plain-English sentence describing what you saw and chose (e.g., 'Night hallway portrait — kept face sharp, painted raised hands, added flash falloff and subtle dirty bar shadow cast.' OR 'Non-face bar table filler — kept foreground drinks and hand sharp with gentle flash and casual tilt.').",
   "focus_center": [x, y],
   "keep_sharp_polygons": [
     {
-      "label": "face",
-      "points": [[x1, y1], [x2, y2], ... 8 to 14 contour points tracing the face/eyes/head closely]
+      "label": "face_or_hero_object",
+      "points": [[x1, y1], [x2, y2], ... 6 to 14 contour points tracing every clearly visible face OR the main foreground hero object if there is no face]
     }
   ],
   "blur_polygons": [
     {
-      "label": "left_arm_hand",
-      "points": [[x1, y1], [x2, y2], ... 6 to 14 contour points tracing a moving arm, hand, gesture, foreground edge, or hair movement],
+      "label": "moving_arm_or_soft_edge",
+      "points": [[x1, y1], [x2, y2], ... 6 to 14 contour points tracing moving arms/hands/hair OR dark outer background edges on non-face shots],
       "pivot": [px, py],
       "swing_angle_deg": 8.0
     }
@@ -56,20 +57,77 @@ Return ONLY valid JSON matching this exact schema (all coordinates normalized 0 
     "outer_smear": 0.62,
     "focus_radius": 1.8,
     "glow_amount": 0.30,
-    "grain_amount": 0.28
+    "grain_amount": 0.28,
+    "flash_falloff": 0.55,
+    "bar_shadow_cast": 0.50,
+    "tilt_angle": -1.8,
+    "crop_offset": 0.25
   }
 }
 
-Rules for high accuracy:
-1. ALWAYS trace the subject's face (and eyes/mouth) tightly in `keep_sharp_polygons` using 8–14 polygon points following the real contour — NEVER leave the face out.
-2. In `blur_polygons`, trace the actual outer limbs/arms/hands/gestures/props that naturally move in candid night or mirror shots (or foreground edges/railings for stairs/depth shots). Do NOT overlap the face.
-3. For each arm/hand in `blur_polygons`, place `pivot` at the real shoulder or elbow joint `[px, py]` that the limb swings around, and pick a natural `swing_angle_deg` between -14 and +14 (positive = counter-clockwise, negative = clockwise).
+Rules for maximum realism:
+1. Works on ANY photo — including non-face filler shots (drinks, restaurant table, food, pets, shoes, handbags, street scenes):
+   - If one or more people/faces are clearly visible: set `scene_role` to `"portrait"` and trace ALL clearly visible faces in `keep_sharp_polygons` (do NOT intentionally blur out friends' faces in a group photo).
+   - If NO face is visible: set `scene_role` to `"non_face_object"`, set `focus_center` on the main foreground hero object (e.g. cocktails, plate, reaching hand, pet, phone), trace that hero object in `keep_sharp_polygons`, and optionally trace empty dark background corners in `blur_polygons` (omit `pivot` for non-limb edges).
+2. In `blur_polygons` on portraits, trace moving outer limbs/arms/hands/gestures/hair without overlapping any face. Place `pivot` at the real shoulder or elbow joint `[px, py]` with natural `swing_angle_deg` (-14..+14).
+3. Be strict and realistic about lighting effects:
+   - `flash_falloff` (0.0..0.85): Use 0.35–0.75 ONLY on night/dim indoor flash scenes (hallways, bars, parties, dark tables). Set `0.0` on bright daylight, outdoor sun, or bright clean indoor/mirror shots!
+   - `bar_shadow_cast` (0.0..0.80): Use 0.30–0.70 ONLY on night bars, clubs, dim hallways, or late-night indoor scenes. Set `0.0` on bright daylight or clean daytime rooms!
+   - `tilt_angle` (-3.2..+3.2): Use subtle accidental phone tilt (±1.2° to ±2.6°) on candid shots; keep smaller (±0.5° to ±1.2°) on mirror selfies or architectural shots.
+   - `crop_offset` (0.0..0.45): Use 0.15–0.35 for casual off-center phone framing; 0.0–0.15 if the subject is already close to an edge.
 4. Pick `recommended_settings.motion_method`:
-   - "flash_drag" for night/indoor flash or party shots where face stays sharp and background/arms trail.
-   - "pivot_swing" when one or both hands/arms are clearly raised, waving, fixing hair, or gesturing against a mostly still background.
-   - "camera_swirl" for club, nightlife, neon street, or high-energy candid moments that suit a wrist-flick shutter swirl.
-   - "handheld_shake" for casual mirror selfies, gym snaps, or cozy indoor moments where the whole phone gently moved.
+   - "flash_drag" for night/indoor flash, bars, parties, or flash table shots.
+   - "pivot_swing" when hands/arms are clearly raised, waving, fixing hair, or gesturing.
+   - "camera_swirl" for club, nightlife, neon street, or high-energy candid moments.
+   - "handheld_shake" for casual mirror selfies, daylight snaps, or subtle handheld shots.
 5. Output raw JSON only — no markdown fences, no commentary."""
+
+
+CAROUSEL_DIRECTOR_PROMPT = """You are an expert Instagram photography director planning a cohesive, ultra-realistic multi-slide Photo Dump carousel.
+
+You are looking at a numbered contact sheet of slides (SLIDE 1, SLIDE 2, ...). Your job is to decide:
+1. Which slides were shot in the **SAME photoshoot / room / lighting moment** (`scene_group`), vs which slides are from **DIFFERENT moments/locations**.
+2. What optical recipe each `scene_group` should get so the entire carousel looks 100% real.
+
+CRITICAL REALISM RULES:
+- **Same-scene cohesion**: If two or more slides are clearly from the SAME photoshoot, room, outfit, or lighting (for example, Slide 1 and Slide 4 both showing the same person in the same dark hallway), they **MUST share the EXACT SAME `scene_group` ID** and therefore receive the **EXACT SAME camera look, `preset_id`, `flash_falloff`, and `bar_shadow_cast`**! Never make two photos from the same hallway look like totally different cameras/filters.
+- **Different-scene variety**: Slides from genuinely different moments (e.g., a mirror selfie at home vs a dim bar table with cocktails vs a dark hallway) SHOULD have different `scene_group` IDs so each moment gets authentic camera physics matching its real lighting (e.g., `flash_falloff: 0.0` and `bar_shadow_cast: 0.0` on daylight/mirror, stronger flash/cast on dark bar/hallway).
+- **Non-face shots supported**: If a slide has NO face (e.g., drinks, food, table, shoes, street, pet), set `scene_role` to `"non_face_object"`. Otherwise set `scene_role` to `"portrait"`. Do NOT apply group-shot main-face-only blur separation.
+
+Allowed `preset_id` values:
+- `"flash_party_blur"` (night direct flash party / hallway / flash table shot)
+- `"club_whip_swirl"` (moody dim club / nightlife ambient swirl)
+- `"warm_night_missed_focus"` (warm restaurant / golden evening soft focus)
+- `"quick_gym_mirror_snap"` (bright indoor / mirror selfie / clean casual)
+- `"daylight_candid_snap"` (bright outdoor / daylight candid)
+- `"moving_hands_party"` (raised moving hands / gesture blur)
+- `"3am_night_zoom"` (very dark late-night pinch-zoom grainy dump)
+- `"lofi_streetlight_blur"` (moody outdoor 3AM streetlight blur)
+
+Return ONLY valid JSON matching this exact schema:
+{
+  "carousel_summary": "One short plain-English sentence explaining how you grouped matching scenes and balanced the carousel.",
+  "scene_groups": {
+    "hallway_night": {
+      "label": "Night Hallway",
+      "preset_id": "flash_party_blur",
+      "flash_falloff": 0.62,
+      "bar_shadow_cast": 0.58,
+      "base_tilt": -2.0
+    }
+  },
+  "slides": [
+    {
+      "slide_number": 1,
+      "scene_group": "hallway_night",
+      "scene_role": "portrait" | "non_face_object",
+      "tilt_offset": -0.3,
+      "crop_offset": 0.25,
+      "note": "Short 5-8 word plain-English tag"
+    }
+  ]
+}
+Output raw JSON only — no markdown fences, no commentary."""
 
 
 SUGGESTED_MODELS: Dict[str, List[Dict[str, str]]] = {
@@ -115,6 +173,7 @@ class AIDirectorResult:
     brush_rgba: np.ndarray  # HxWx4 uint8 RGBA mask (Green=sharp, Red=blur)
     model_used: str
     provider_used: str
+    scene_role: str = "portrait"  # "portrait" | "non_face_object"
     raw_notes: List[str] = field(default_factory=list)
 
 
@@ -214,10 +273,16 @@ def rasterize_guidance_to_brush_rgba(
     return rgba
 
 
-def _call_gemini_vision(b64: str, mime: str, cfg: VisionDirectorConfig, user_goal: str) -> str:
+def _call_gemini_vision(
+    b64: str,
+    mime: str,
+    cfg: VisionDirectorConfig,
+    user_goal: str,
+    system_prompt: str = DIRECTOR_SYSTEM_PROMPT,
+) -> str:
     model = cfg.model.removeprefix("models/")
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-    prompt = DIRECTOR_SYSTEM_PROMPT
+    prompt = system_prompt
     if user_goal:
         prompt += f"\n\nUser's target look / instruction: {user_goal}"
 
@@ -256,13 +321,19 @@ def _call_gemini_vision(b64: str, mime: str, cfg: VisionDirectorConfig, user_goa
         return text
 
 
-def _call_openai_compat_vision(b64: str, mime: str, cfg: VisionDirectorConfig, user_goal: str) -> str:
+def _call_openai_compat_vision(
+    b64: str,
+    mime: str,
+    cfg: VisionDirectorConfig,
+    user_goal: str,
+    system_prompt: str = DIRECTOR_SYSTEM_PROMPT,
+) -> str:
     if cfg.provider == "openrouter":
         url = "https://openrouter.ai/api/v1/chat/completions"
         headers = {
             "Authorization": f"Bearer {cfg.api_key}",
             "Content-Type": "application/json",
-            "HTTP-Referer": "http://127.0.0.1:8765",
+            "HTTP-Referer": "http://127.0.0.1:8785",
             "X-Title": "Influencer Blur Lab",
         }
     else:
@@ -272,7 +343,7 @@ def _call_openai_compat_vision(b64: str, mime: str, cfg: VisionDirectorConfig, u
             "Content-Type": "application/json",
         }
 
-    prompt = DIRECTOR_SYSTEM_PROMPT
+    prompt = system_prompt
     if user_goal:
         prompt += f"\n\nUser's target look / instruction: {user_goal}"
 
@@ -356,7 +427,13 @@ def _upload_base64_to_kie(b64: str, mime: str, api_key: str) -> Optional[str]:
     return None
 
 
-def _call_kie_vision(b64: str, mime: str, cfg: VisionDirectorConfig, user_goal: str) -> str:
+def _call_kie_vision(
+    b64: str,
+    mime: str,
+    cfg: VisionDirectorConfig,
+    user_goal: str,
+    system_prompt: str = DIRECTOR_SYSTEM_PROMPT,
+) -> str:
     """Call Kie.ai's OpenAI-compatible multimodal endpoint (e.g. Gemini 4 Neon / Hydrogen / Carbon)."""
     url = build_kie_chat_url(cfg.model)
     headers = {
@@ -369,7 +446,7 @@ def _call_kie_vision(b64: str, mime: str, cfg: VisionDirectorConfig, user_goal: 
     hosted_url = _upload_base64_to_kie(b64, mime, cfg.api_key)
     image_ref = hosted_url or f"data:{mime};base64,{b64}"
 
-    prompt = DIRECTOR_SYSTEM_PROMPT
+    prompt = system_prompt
     if user_goal:
         prompt += f"\n\nUser's target look / instruction: {user_goal}"
 
@@ -476,7 +553,9 @@ def direct_photo_with_ai(
             blur_polys.append(entry)
 
     rec = parsed.get("recommended_settings") if isinstance(parsed.get("recommended_settings"), dict) else {}
-    summary = str(parsed.get("scene_summary") or "AI painted sharp face protection and moving limb blur regions.").strip()
+    summary = str(parsed.get("scene_summary") or "AI painted sharp subject protection and motion blur regions.").strip()
+    raw_role = str(parsed.get("scene_role") or "portrait").strip().lower()
+    scene_role = "non_face_object" if raw_role in ("non_face_object", "object", "no_face", "filler") else "portrait"
 
     h, w = rgb_u8.shape[:2]
     brush_rgba = rasterize_guidance_to_brush_rgba((h, w), sharp_polys, blur_polys)
@@ -491,6 +570,7 @@ def direct_photo_with_ai(
         brush_rgba=brush_rgba,
         model_used=cfg.model,
         provider_used=cfg.provider,
+        scene_role=scene_role,
     )
 
 
@@ -498,15 +578,28 @@ def apply_director_guidance_to_config(
     config: PipelineConfig,
     result: AIDirectorResult,
     apply_slider_recommendations: bool = False,
+    apply_realism_recommendations: bool = True,
 ) -> PipelineConfig:
-    """Apply AI-detected face focus center, arm pivots, and optional slider recommendations to a config."""
+    """Apply AI-detected focus center, arm pivots, realism extras (flash/cast/tilt), and optional sliders."""
     cfg = PipelineConfig.from_dict(config.to_dict())
     cfg.stage1_focus.focus_center_x = result.focus_center[0]
     cfg.stage1_focus.focus_center_y = result.focus_center[1]
+    if result.scene_role == "non_face_object":
+        cfg.stage1_focus.falloff_mode = "edges"
     cfg.stage2_motion.ai_pivots = result.pivots
 
-    if apply_slider_recommendations and result.recommended_settings:
-        rec = result.recommended_settings
+    rec = result.recommended_settings or {}
+    if apply_realism_recommendations and rec:
+        if "flash_falloff" in rec:
+            cfg.stage3_optics.flash_falloff = float(rec["flash_falloff"])
+        if "bar_shadow_cast" in rec:
+            cfg.stage3_optics.bar_shadow_cast = float(rec["bar_shadow_cast"])
+        if "tilt_angle" in rec:
+            cfg.stage5_compression.tilt_angle = float(rec["tilt_angle"])
+        if "crop_offset" in rec:
+            cfg.stage5_compression.crop_offset = float(rec["crop_offset"])
+
+    if apply_slider_recommendations and rec:
         method = rec.get("motion_method")
         if method in ("flash_drag", "handheld_shake", "pivot_swing", "camera_swirl"):
             cfg.stage2_motion.method = method
@@ -526,6 +619,172 @@ def apply_director_guidance_to_config(
             cfg.stage4_grain.grain_amount = float(rec["grain_amount"])
 
     return cfg.validated()
+
+
+def _build_numbered_contact_sheet(images_rgb: List[np.ndarray]) -> np.ndarray:
+    """Build a crisp numbered contact sheet (SLIDE 1..N) so the Vision LLM inspects the whole carousel at once."""
+    from PIL import ImageDraw
+
+    n = len(images_rgb)
+    cols = min(4, max(1, n))
+    rows = (n + cols - 1) // cols
+    cell_w, cell_h = 340, 420
+    pad = 14
+    header_h = 30
+
+    canvas = Image.new(
+        "RGB",
+        (cols * cell_w + (cols + 1) * pad, rows * (cell_h + header_h) + (rows + 1) * pad),
+        (16, 18, 22),
+    )
+    draw = ImageDraw.Draw(canvas)
+
+    for idx, rgb in enumerate(images_rgb):
+        r = idx // cols
+        c = idx % cols
+        x0 = pad + c * (cell_w + pad)
+        y0 = pad + r * (cell_h + header_h + pad)
+
+        draw.rectangle([x0, y0, x0 + cell_w, y0 + header_h], fill=(35, 38, 45))
+        draw.text((x0 + 10, y0 + 8), f"SLIDE {idx + 1}", fill=(245, 166, 35))
+
+        pil = Image.fromarray(rgb, mode="RGB")
+        pil.thumbnail((cell_w, cell_h), Image.Resampling.LANCZOS)
+        ox = x0 + (cell_w - pil.width) // 2
+        oy = y0 + header_h + (cell_h - pil.height) // 2
+        canvas.paste(pil, (ox, oy))
+
+    return np.array(canvas, dtype=np.uint8)
+
+
+def direct_carousel_with_ai(
+    images_rgb: List[np.ndarray],
+    director_cfg: VisionDirectorConfig,
+    carousel_vibe: str = "one_night_out",
+    auto_tilt: bool = True,
+    auto_flash_cast: bool = True,
+    vary_per_slide: bool = True,
+    seed_offset: int = 0,
+) -> Dict[str, Any]:
+    """One-shot Vision LLM Carousel Director: groups same-photoshoot slides together & assigns cohesive recipes."""
+    from .auto_scene import analyze_and_build_auto_config
+    from .presets import get_builtin_preset
+
+    cfg = director_cfg.validated()
+    if not cfg.api_key:
+        raise ValueError("No Vision AI API key is configured.")
+
+    sheet = _build_numbered_contact_sheet(images_rgb)
+    b64, mime = _encode_image_for_vision(sheet, max_edge=1440)
+    goal = (
+        f"Target Carousel Vibe: {carousel_vibe}. "
+        f"There are {len(images_rgb)} slides numbered SLIDE 1 through SLIDE {len(images_rgb)}. "
+        "Remember: slides taken in the same room/photoshoot/outfit MUST share the EXACT same scene_group and camera look!"
+    )
+
+    if cfg.provider == "kie":
+        raw_text = _call_kie_vision(b64, mime, cfg, goal, system_prompt=CAROUSEL_DIRECTOR_PROMPT)
+    elif cfg.provider == "gemini":
+        raw_text = _call_gemini_vision(b64, mime, cfg, goal, system_prompt=CAROUSEL_DIRECTOR_PROMPT)
+    else:
+        raw_text = _call_openai_compat_vision(b64, mime, cfg, goal, system_prompt=CAROUSEL_DIRECTOR_PROMPT)
+
+    parsed = _extract_json_object(raw_text)
+    raw_groups = parsed.get("scene_groups") if isinstance(parsed.get("scene_groups"), dict) else {}
+    raw_slides = parsed.get("slides") if isinstance(parsed.get("slides"), list) else []
+    carousel_summary = str(parsed.get("carousel_summary") or "Vision AI grouped matching scenes for consistent camera realism.").strip()
+
+    # Map slide_number -> LLM decision
+    slide_by_num: Dict[int, Dict[str, Any]] = {}
+    for s in raw_slides:
+        if isinstance(s, dict) and "slide_number" in s:
+            try:
+                slide_by_num[int(s["slide_number"])] = s
+            except Exception:
+                continue
+
+    # Build canonical PipelineConfig per LLM scene_group so matching photos get IDENTICAL base optics & lighting!
+    group_cfgs: Dict[str, PipelineConfig] = {}
+    group_labels: Dict[str, str] = {}
+    group_base_tilt: Dict[str, float] = {}
+
+    for g_id, g_meta in raw_groups.items():
+        if not isinstance(g_meta, dict):
+            continue
+        pid = str(g_meta.get("preset_id") or "flash_party_blur")
+        try:
+            base = get_builtin_preset(pid)
+        except Exception:
+            base = get_builtin_preset("flash_party_blur")
+
+        c = PipelineConfig.from_dict(base.to_dict())
+        if auto_flash_cast:
+            c.stage3_optics.flash_falloff = float(g_meta.get("flash_falloff", 0.0))
+            c.stage3_optics.bar_shadow_cast = float(g_meta.get("bar_shadow_cast", 0.0))
+        else:
+            c.stage3_optics.flash_falloff = 0.0
+            c.stage3_optics.bar_shadow_cast = 0.0
+
+        group_cfgs[str(g_id)] = c.validated()
+        group_labels[str(g_id)] = str(g_meta.get("label") or str(g_id).replace("_", " ").title())
+        group_base_tilt[str(g_id)] = float(g_meta.get("base_tilt", -1.6))
+
+    plan: List[Dict[str, Any]] = []
+    for idx, img in enumerate(images_rgb):
+        local_an = analyze_and_build_auto_config(
+            img,
+            strength=1.0,
+            auto_tilt=auto_tilt,
+            auto_flash_cast=auto_flash_cast,
+        )
+        s_meta = slide_by_num.get(idx + 1, {})
+        g_id = str(s_meta.get("scene_group") or f"scene_{idx + 1}")
+        raw_role = str(s_meta.get("scene_role") or local_an.scene_role).lower()
+        role = "non_face_object" if raw_role in ("non_face_object", "object", "no_face", "filler") else "portrait"
+
+        if g_id in group_cfgs:
+            c = PipelineConfig.from_dict(group_cfgs[g_id].to_dict())
+            g_label = group_labels[g_id]
+            base_tilt = group_base_tilt.get(g_id, -1.6)
+        else:
+            c = PipelineConfig.from_dict(local_an.config.to_dict())
+            g_label = f"Scene {idx + 1} · {local_an.archetype_label}"
+            base_tilt = c.stage5_compression.tilt_angle
+
+        c.stage1_focus.focus_center_x = local_an.subject_center[0]
+        c.stage1_focus.focus_center_y = local_an.subject_center[1]
+        if role == "non_face_object":
+            c.stage1_focus.falloff_mode = "edges"
+
+        slide_seed = int(local_an.config.stage2_motion.seed + seed_offset + idx * 71)
+        c.stage2_motion.seed = slide_seed
+        c.stage4_grain.seed = slide_seed + 19
+        c.stage5_compression.framing_seed = slide_seed + 37
+
+        if auto_tilt:
+            jitter = float(s_meta.get("tilt_offset", 0.0)) if vary_per_slide else 0.0
+            c.stage5_compression.tilt_angle = float(np.clip(base_tilt + jitter, -3.5, 3.5))
+            c.stage5_compression.crop_offset = float(np.clip(float(s_meta.get("crop_offset", 0.24)), 0.0, 0.5))
+        else:
+            c.stage5_compression.tilt_angle = 0.0
+            c.stage5_compression.crop_offset = 0.0
+
+        plan.append({
+            "index": idx,
+            "scene_group": g_id,
+            "scene_group_label": g_label,
+            "scene_role": role,
+            "archetype_label": c.name,
+            "summary": str(s_meta.get("note") or local_an.plain_summary),
+            "config": c.validated(),
+        })
+
+    return {
+        "carousel_summary": carousel_summary,
+        "model_used": cfg.model,
+        "provider_used": cfg.provider,
+        "slides": plan,
+    }
 
 
 def list_available_vision_models(provider: str, api_key: str) -> List[Dict[str, str]]:
