@@ -51,6 +51,7 @@ const state = {
   presets: { builtin: [], custom: [] },
   activePresetId: "auto",
   config: null,
+  strengthBaseConfig: null,
   stages: {},
   selectedStage: "stage5",
   viewMode: "side",
@@ -445,6 +446,16 @@ function renderPresetBar() {
   }
 }
 
+function resetStrengthSliderTo100() {
+  state.autoStrength = 1.0;
+  const el = $("autoStrengthSlider");
+  if (el) {
+    el.value = "100";
+    updateSliderFill(el);
+  }
+  if ($("autoStrengthVal")) $("autoStrengthVal").textContent = "100%";
+}
+
 function scaleConfigByStrength(baseCfg, mult) {
   const cfg = deepClone(baseCfg);
   if (Math.abs(mult - 1.0) < 0.02) return cfg;
@@ -454,6 +465,8 @@ function scaleConfigByStrength(baseCfg, mult) {
   cfg.stage2_motion.swing_angle = Math.max(1.5, Math.min(20, cfg.stage2_motion.swing_angle * mult));
   cfg.stage3_optics.glow_amount = Math.max(0, Math.min(1, cfg.stage3_optics.glow_amount * mult));
   cfg.stage3_optics.haze_lift = Math.max(0, Math.min(1, cfg.stage3_optics.haze_lift * mult));
+  cfg.stage3_optics.flash_falloff = Math.max(0, Math.min(1, (cfg.stage3_optics.flash_falloff || 0) * mult));
+  cfg.stage3_optics.bar_shadow_cast = Math.max(0, Math.min(1, (cfg.stage3_optics.bar_shadow_cast || 0) * mult));
   cfg.stage4_grain.grain_amount = Math.max(0, Math.min(1, cfg.stage4_grain.grain_amount * mult));
   return cfg;
 }
@@ -461,6 +474,7 @@ function scaleConfigByStrength(baseCfg, mult) {
 function applyPresetToState(preset, triggerProcess = true) {
   state.autoMode = false;
   state.activePresetId = preset.id;
+  state.strengthBaseConfig = deepClone(preset.config);
   const scaled = scaleConfigByStrength(preset.config, state.autoStrength);
   scaled.stage1_focus.focus_center_x = state.subjectCenter[0];
   scaled.stage1_focus.focus_center_y = state.subjectCenter[1];
@@ -621,6 +635,10 @@ function updateControlReadoutsAndVisibility() {
 function scheduleAutoProcess() {
   state.autoMode = false;
   readControlsIntoConfig();
+  if (state.config) {
+    state.strengthBaseConfig = deepClone(state.config);
+    resetStrengthSliderTo100();
+  }
   if (!$("autoApplyCheck").checked || !state.imageId) return;
   clearTimeout(state.debounceTimer);
   state.debounceTimer = setTimeout(() => {
@@ -1428,6 +1446,8 @@ function renderShowdownGrid(data) {
       state.autoMode = false;
       state.activePresetId = "";
       state.config = deepClone(opt.config);
+      state.strengthBaseConfig = deepClone(opt.config);
+      resetStrengthSliderTo100();
       const clean = opt.label.replace(/^[A-C]\s*·\s*/, "");
       setDetectionPill(`Look: ${clean} · ${opt.subtitle}`, opt.subtitle);
       syncControlsFromConfig();
@@ -1654,6 +1674,8 @@ async function openDumpSlideInStudio(idx) {
     state.activePresetId = "";
     state.selectedStage = "stage5";
     state.config = slide.config ? deepClone(slide.config) : state.config;
+    state.strengthBaseConfig = state.config ? deepClone(state.config) : null;
+    resetStrengthSliderTo100();
     syncControlsFromConfig();
     renderPresetBar();
 
@@ -1983,11 +2005,26 @@ function bindEvents() {
     state.strengthTimer = setTimeout(() => {
       if (state.autoMode) {
         runAutoMatch(false);
-      } else {
-        const chosen = allPresets().find((p) => p.id === state.activePresetId);
-        if (chosen) applyPresetToState(chosen, true);
+        return;
       }
-    }, 280);
+      const chosen = state.activePresetId ? allPresets().find((p) => p.id === state.activePresetId) : null;
+      if (chosen) {
+        applyPresetToState(chosen, true);
+        return;
+      }
+      // Works seamlessly for Photo Dump slides opened in Studio, Showdown winners, and custom Fine-Tuned looks!
+      if (!state.strengthBaseConfig && state.config) {
+        state.strengthBaseConfig = deepClone(state.config);
+      }
+      if (state.strengthBaseConfig) {
+        const scaled = scaleConfigByStrength(state.strengthBaseConfig, state.autoStrength);
+        scaled.stage1_focus.focus_center_x = state.subjectCenter[0];
+        scaled.stage1_focus.focus_center_y = state.subjectCenter[1];
+        state.config = scaled;
+        syncControlsFromConfig();
+        processCurrentPhoto();
+      }
+    }, 260);
   });
 
   $("quickRerollBtn").addEventListener("click", () => {
