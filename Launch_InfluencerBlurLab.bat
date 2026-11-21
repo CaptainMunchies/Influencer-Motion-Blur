@@ -76,7 +76,7 @@ echo [2/3] Packages already up to date.
 :start_app
 echo [3/3] Starting Influencer Blur Lab in your web browser...
 echo.
-".venv\Scripts\python.exe" -m app.server --host 127.0.0.1 --port 8765 %*
+".venv\Scripts\python.exe" -m app.server --host 127.0.0.1 --port 8785 %*
 
 if errorlevel 1 (
     echo.

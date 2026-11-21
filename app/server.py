@@ -749,23 +749,41 @@ def _open_browser_later(url: str) -> None:
         pass
 
 
+def _pick_open_port(host: str, preferred: int, max_tries: int = 25) -> int:
+    import socket
+
+    for offset in range(max_tries):
+        candidate = preferred + offset
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind((host, candidate))
+                return candidate
+            except OSError:
+                continue
+    return preferred
+
+
 def main() -> None:
     import uvicorn
 
     parser = argparse.ArgumentParser(description="Influencer Blur Lab local web app")
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--port", type=int, default=8785)
     parser.add_argument("--no-browser", action="store_true")
     args = parser.parse_args()
 
-    url = f"http://{args.host}:{args.port}"
+    port = _pick_open_port(args.host, args.port)
+    if port != args.port:
+        print(f"  Note: Port {args.port} is in use; using port {port} instead.")
+
+    url = f"http://{args.host}:{port}"
     print(f"\n  Influencer Blur Lab is running at: {url}")
     print("  Keep this window open while editing. Close it when you are done.\n")
 
     if not args.no_browser:
         threading.Thread(target=_open_browser_later, args=(url,), daemon=True).start()
 
-    uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
+    uvicorn.run(app, host=args.host, port=port, log_level="warning")
 
 
 if __name__ == "__main__":
