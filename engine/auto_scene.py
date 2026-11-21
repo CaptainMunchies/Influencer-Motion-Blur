@@ -94,24 +94,25 @@ def _detect_subject_center_fast(rgb_u8: np.ndarray) -> Tuple[float, float]:
     grad_norm = np.clip(grad / (np.percentile(grad, 95) + 1e-4), 0.0, 1.0)
     grad_smooth = cv2.GaussianBlur(grad_norm, (0, 0), sigmaX=max(3.0, sw * 0.05))
 
-    # 3. Gentle portrait prior favoring upper-middle 15%..68% vertical band and avoiding extreme borders
+    # 3. Portrait prior favoring upper-half head/face zone (avoids locking onto legs in full-body shots!)
     yy, xx = np.mgrid[0:sh, 0:sw].astype(np.float32)
     xn = xx / max(1, sw - 1)
     yn = yy / max(1, sh - 1)
     border_fade = (
         np.clip(xn / 0.14, 0.0, 1.0)
         * np.clip((1.0 - xn) / 0.14, 0.0, 1.0)
-        * np.clip(yn / 0.10, 0.0, 1.0)
-        * np.clip((1.0 - yn) / 0.16, 0.0, 1.0)
+        * np.clip(yn / 0.08, 0.0, 1.0)
+        * np.clip((1.0 - yn) / 0.24, 0.0, 1.0)
     )
-    upper_bias = np.exp(-(((yn - 0.36) / 0.34) ** 2)) * np.exp(-(((xn - 0.50) / 0.45) ** 2))
+    upper_bias = np.exp(-(((yn - 0.31) / 0.25) ** 2)) * np.exp(-(((xn - 0.50) / 0.44) ** 2))
+    # Suppress lower third strongly when picking head/face center
+    leg_suppress = np.where(yn > 0.62, np.clip(1.0 - (yn - 0.62) * 2.2, 0.15, 1.0), 1.0)
 
-    # Skin + texture overlap strongly peaks on faces/heads; fall back cleanly to texture if silhouetted
     skin_peak = float(np.max(skin))
     if skin_peak > 0.18:
-        score = (skin * (0.45 + 0.55 * grad_smooth)) * border_fade * (0.45 + 0.55 * upper_bias)
+        score = (skin * (0.45 + 0.55 * grad_smooth)) * border_fade * (0.25 + 0.75 * upper_bias) * leg_suppress
     else:
-        score = grad_smooth * border_fade * (0.35 + 0.65 * upper_bias)
+        score = grad_smooth * border_fade * (0.30 + 0.70 * upper_bias) * leg_suppress
 
     # Smooth score to locate the dominant head/subject peak rather than a tiny stray speck
     score = cv2.GaussianBlur(score, (0, 0), sigmaX=max(4.0, min(sw, sh) * 0.07))

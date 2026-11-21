@@ -267,19 +267,31 @@ class LocalFlashDragProvider(MotionProvider):
         blended = fw * flash_exposure + (1.0 - fw) * ambient_exposure
 
         # 3. Localized outer-limb / edge motion smear anchored around the REAL detected subject center!
-        if cfg.outer_smear > 0.02:
+        if cfg.outer_smear > 0.02 or (brush is not None and brush.has_blur):
             outer_mask = build_outer_limb_mask(
                 (h, w), brush=brush, face_cx=focus_center[0], face_cy=focus_center[1]
             )
+            eff_smear = max(cfg.outer_smear, 0.78 if (brush is not None and brush.has_blur) else 0.0)
+            limb_span = max(4.5, span_px * (1.75 + 1.15 * eff_smear))
             psf_limb = generate_curved_shake_psf(
-                span_px=max(3.5, span_px * (1.45 + 0.95 * cfg.outer_smear)),
+                span_px=limb_span,
                 curvature=min(1.0, cfg.curvature + 0.18),
-                ghost_strength=min(1.0, cfg.ghost_strength * 0.72),
+                ghost_strength=min(1.0, cfg.ghost_strength * 0.78),
                 direction_angle_deg=cfg.direction_angle + 20.0,
                 seed=cfg.seed + 19,
             )
             limb_smeared = convolve_linear_rgb(linear_rgb, psf_limb)
-            limb_w = (outer_mask * cfg.outer_smear * 0.78)[..., np.newaxis]
+
+            # Convolve the limb mask with the SAME motion PSF (max-blended with original mask)
+            # so moving hands/arms physically trail OUT into the surrounding air instead of
+            # clipping sharply at the static limb outline!
+            trail_mask = cv2.filter2D(outer_mask, cv2.CV_32F, psf_limb, borderType=cv2.BORDER_REFLECT_101)
+            swept_mask = np.clip(np.maximum(outer_mask, trail_mask * 1.45), 0.0, 1.0)
+            if brush is not None and brush.has_sharp:
+                swept_mask = swept_mask * (1.0 - brush.keep_sharp)
+
+            limb_strength = 0.88 if (brush is not None and brush.has_blur) else 0.78
+            limb_w = (swept_mask * eff_smear * limb_strength)[..., np.newaxis]
             blended = blended * (1.0 - limb_w) + limb_smeared * limb_w
 
         # Respect explicit "Keep Sharp" brush strokes on top
@@ -351,43 +363,67 @@ class LocalPivotSwingProvider(MotionProvider):
 
         h, w = linear_rgb.shape[:2]
 
-        # Priority 1: Exact AI-detected shoulder/elbow pivot points + per-limb polygons!
+        # Priority 1: Exact AI-detected shoulder/elbow pivot points + per-limb swept arc trails!
         if cfg.ai_pivots:
             out = linear_rgb.copy()
-            sigma = max(4.0, min(h, w) * 0.025)
+            sigma = max(4.0, min(h, w) * 0.022)
             ksize = max(5, min(int(sigma * 4) | 1, 151))
             for piv in cfg.ai_pivots:
                 px = float(piv["x"]) * (w - 1)
                 py = float(piv["y"]) * (h - 1)
                 ang = float(piv.get("angle_deg", cfg.swing_angle))
-                # Scale AI angle proportionally to user's Arm Swing Arc slider
-                scale_ang = (cfg.swing_angle / 8.0)
-                arc_img = self._rotational_arc_blur(
-                    linear_rgb,
-                    pivot_xy=(px, py),
-                    max_angle_deg=ang * scale_ang,
-                    steps=19,
-                    ghost_strength=cfg.ghost_strength,
-                )
+                # Ensure noticeable yet tasteful arc amplitude
+                if abs(ang) < 5.0:
+                    ang = 7.5 if ang >= 0 else -7.5
+                scale_ang = max(0.85, cfg.swing_angle / 7.0)
+                total_ang = float(np.clip(ang * scale_ang, -20.0, 20.0))
+
                 poly_pts = piv.get("polygon")
                 if poly_pts and len(poly_pts) >= 3:
-                    limb_mask = np.zeros((h, w), dtype=np.float32)
+                    base_mask = np.zeros((h, w), dtype=np.float32)
                     poly = np.array(
                         [[int(round(pt[0] * (w - 1))), int(round(pt[1] * (h - 1)))] for pt in poly_pts],
                         dtype=np.int32,
                     )
-                    cv2.fillPoly(limb_mask, [poly], 1.0)
-                    limb_mask = cv2.GaussianBlur(limb_mask, (ksize, ksize), sigma)
-                    limb_mask = np.clip(limb_mask * 1.15, 0.0, 1.0)
+                    cv2.fillPoly(base_mask, [poly], 1.0)
+                    base_mask = cv2.GaussianBlur(base_mask, (ksize, ksize), sigma)
+                    base_mask = np.clip(base_mask * 1.15, 0.0, 1.0)
                 elif brush is not None and brush.has_blur:
-                    limb_mask = brush.extra_blur.copy()
+                    base_mask = brush.extra_blur.copy()
                 else:
-                    limb_mask = build_outer_limb_mask((h, w), brush=brush)
+                    base_mask = build_outer_limb_mask((h, w), brush=brush, face_cx=focus_center[0], face_cy=focus_center[1])
+
+                # Sweep BOTH the pixels AND the limb mask along the exact rotational arc so the
+                # moving arm/hand/hair physically trails out into the air instead of clipping!
+                steps = 19
+                angles = np.linspace(-total_ang * 0.35, total_ang * 0.65, steps, dtype=np.float32)
+                t = np.linspace(0.0, 1.0, steps, dtype=np.float32)
+                weights = (1.0 - 0.50 * t) + cfg.ghost_strength * (
+                    1.35 * np.exp(-((t / 0.14) ** 2)) + 0.65 * np.exp(-(((1.0 - t) / 0.18) ** 2))
+                )
+                weights = (weights / weights.sum()).astype(np.float32)
+
+                arc_img = np.zeros_like(linear_rgb, dtype=np.float32)
+                swept_mask = base_mask.copy()
+                for a_deg, wt in zip(angles, weights):
+                    if abs(float(a_deg)) < 0.05:
+                        arc_img += linear_rgb * wt
+                        continue
+                    M = cv2.getRotationMatrix2D((px, py), float(a_deg), 1.0)
+                    warped_img = cv2.warpAffine(
+                        linear_rgb, M, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT_101
+                    )
+                    warped_m = cv2.warpAffine(
+                        base_mask, M, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0.0
+                    )
+                    arc_img += warped_img * wt
+                    # Smoothly decay mask opacity slightly toward the far tail of the swing
+                    swept_mask = np.maximum(swept_mask, warped_m * (0.68 + 0.32 * float(wt / np.max(weights))))
 
                 if brush is not None and brush.has_sharp:
-                    limb_mask = limb_mask * (1.0 - brush.keep_sharp)
+                    swept_mask = swept_mask * (1.0 - brush.keep_sharp)
 
-                wm = (limb_mask * cfg.swing_intensity)[..., np.newaxis]
+                wm = (np.clip(swept_mask, 0.0, 1.0) * max(0.84, cfg.swing_intensity))[..., np.newaxis]
                 out = out * (1.0 - wm) + arc_img * wm
 
             return MotionResult(linear_rgb=np.maximum(out, 0.0).astype(np.float32), provider_used=f"{self.name}:ai_pivots")
