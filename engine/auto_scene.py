@@ -100,21 +100,32 @@ def _detect_subject_center_and_role(rgb_u8: np.ndarray) -> Tuple[float, float, s
     upper_bias = np.exp(-(((yn - 0.31) / 0.25) ** 2)) * np.exp(-(((xn - 0.50) / 0.44) ** 2))
     leg_suppress = np.where(yn > 0.62, np.clip(1.0 - (yn - 0.62) * 2.2, 0.15, 1.0), 1.0)
 
-    # Tighter true-skin hue for portrait vs tabletop/wood/food role classification
+    # Role detection: distinguish real portraits (including tank tops, bikinis & full-body shots!)
+    # from true non-face object/tabletop shots (wooden tables, drinks, food, shoes, streets).
+    hsv_small = cv2.cvtColor(small, cv2.COLOR_RGB2HSV).astype(np.float32)
+    h_s, s_s, v_s = hsv_small[..., 0], hsv_small[..., 1], hsv_small[..., 2]
     role_skin_bin = (
         (y_c > 40.0)
         & (cr >= 135.0) & (cr <= 172.0)
         & (cb >= 82.0) & (cb <= 126.0)
     ).astype(np.float32)
     role_skin = cv2.GaussianBlur(role_skin_bin, (0, 0), sigmaX=max(2.0, sw * 0.04))
-    upper_skin = role_skin[int(sh * 0.08) : int(sh * 0.56), int(sw * 0.16) : int(sw * 0.84)]
-    lower_skin = role_skin[int(sh * 0.56) : int(sh * 0.96), :]
+    upper_skin = role_skin[int(sh * 0.06) : int(sh * 0.58), int(sw * 0.14) : int(sw * 0.86)]
     upper_skin_peak = float(np.max(upper_skin)) if upper_skin.size else 0.0
     upper_skin_mean = float(np.mean(upper_skin)) if upper_skin.size else 0.0
-    lower_skin_mean = float(np.mean(lower_skin)) if lower_skin.size else 0.0
 
-    wood_or_table = lower_skin_mean > upper_skin_mean * 1.85 and lower_skin_mean > 0.40
-    is_portrait = (upper_skin_peak > 0.24 and upper_skin_mean > 0.015 and not wood_or_table)
+    # High-saturation amber/orange wood or food flooding the lower half (human skin has much lower saturation/amber hue)
+    amber_wood_bin = (
+        (h_s >= 12.0) & (h_s <= 26.0) & (s_s >= 105.0) & (v_s >= 55.0)
+    ).astype(np.float32)
+    lower_amber = float(np.mean(amber_wood_bin[int(sh * 0.45) :, :]))
+    upper_amber = float(np.mean(amber_wood_bin[: int(sh * 0.45), :]))
+
+    is_table_or_object = (
+        (upper_skin_peak < 0.22 or upper_skin_mean < 0.012)
+        or (lower_amber > 0.34 and lower_amber > upper_amber * 1.7)
+    )
+    is_portrait = not is_table_or_object
     role = "portrait" if is_portrait else "non_face_object"
 
     if is_portrait:
@@ -230,7 +241,14 @@ def analyze_and_build_auto_config(
     }
 
     # ---------- Classify into 1 of 5 Real Social-Media Photo Archetypes ----------
-    if dark_ratio > 0.45 and p50 < 62.0:
+    # Bright sunlit outdoor / high-key check FIRST so sunny photos with warm skin/concrete NEVER get labeled Warm Night!
+    is_bright_outdoor = (
+        p50 >= 122.0
+        or (bright_ratio > 0.20 and dark_ratio < 0.22)
+        or (p95 > 208.0 and p50 > 82.0 and dark_ratio < 0.32 and bright_ratio > 0.08)
+    )
+
+    if dark_ratio > 0.45 and p50 < 62.0 and not (p85 > 195.0 and bright_ratio > 0.14):
         if flash_contrast > 18.0 or p95 > 175.0:
             # 1. Direct Flash Night Party (dark room, bright subject / speculars)
             archetype = "flash_party"
@@ -242,34 +260,34 @@ def analyze_and_build_auto_config(
                 color=OpticalColorConfig(gamma=2.2, highlight_threshold=0.85, highlight_boost=0.85 * glow_guard),
                 stage1_focus=Stage1FocusConfig(
                     enabled=True,
-                    radius=1.15 * s,
+                    radius=1.10 * s,
                     falloff_mode="face_center",
-                    falloff_strength=0.78,
+                    falloff_strength=0.80,
                     focus_center_x=fx,
                     focus_center_y=fy,
                 ),
                 stage2_motion=Stage2MotionConfig(
                     enabled=True,
                     method="flash_drag",
-                    shake_amount=9.5 * s,
-                    ghost_strength=0.40,
+                    shake_amount=9.0 * s,
+                    ghost_strength=0.38,
                     curvature=0.66,
                     direction_angle=nat_angle,
-                    flash_sharpness=0.76,
-                    outer_smear=0.58 * min(1.15, strength),
+                    flash_sharpness=0.78,
+                    outer_smear=0.56 * min(1.15, strength),
                     ambient_warmth=0.14,
                     seed=seed,
                 ),
                 stage3_optics=Stage3OpticsConfig(
                     enabled=True,
-                    glow_amount=0.34 * strength * glow_guard,
-                    haze_lift=0.26 * strength * glow_guard,
+                    glow_amount=0.30 * strength * glow_guard,
+                    haze_lift=0.18 * strength * glow_guard,
                     warmth=0.18 if warmth > 12 else 0.08,
-                    edge_fringing=0.18 * strength,
+                    edge_fringing=0.16 * strength,
                 ),
                 stage4_grain=Stage4GrainConfig(
                     enabled=True,
-                    grain_amount=0.34 * strength,
+                    grain_amount=0.32 * strength,
                     clumpiness=0.58,
                     isp_smoothing=0.34,
                     shadow_weight=0.80,
@@ -282,57 +300,57 @@ def analyze_and_build_auto_config(
                 ),
             )
         else:
-            # 2. Dark Moody Ambient Night (dim low-light hallway / club / street without harsh flash)
+            # 2. Dark Moody Ambient Night (dim low-light bedroom / hallway / club without harsh flash)
             archetype = "dark_night_moody"
             label = "Moody Night Swirl"
-            summary = "Dim ambient night scene — dreamy camera-swirl shutter drag anchored on the subject, circular focus softness, glowing point lights & Night Mode grain."
+            summary = "Dim ambient night scene — crisp eyes anchored with soft low-light focus rolloff, subtle camera swirl & Night Mode grain."
             cfg = PipelineConfig(
                 name="Auto — Moody Night Swirl",
                 description=summary,
-                color=OpticalColorConfig(gamma=2.2, highlight_threshold=0.84, highlight_boost=0.95 * glow_guard),
+                color=OpticalColorConfig(gamma=2.2, highlight_threshold=0.84, highlight_boost=0.90 * glow_guard),
                 stage1_focus=Stage1FocusConfig(
                     enabled=True,
-                    radius=2.1 * s,
+                    radius=1.55 * s,
                     falloff_mode="face_center",
-                    falloff_strength=0.72,
+                    falloff_strength=0.80,
                     focus_center_x=fx,
                     focus_center_y=fy,
                 ),
                 stage2_motion=Stage2MotionConfig(
                     enabled=True,
                     method="camera_swirl",
-                    shake_amount=9.0 * s,
-                    ghost_strength=0.36,
-                    curvature=0.66,
+                    shake_amount=7.2 * s,
+                    ghost_strength=0.32,
+                    curvature=0.64,
                     direction_angle=nat_angle,
-                    flash_sharpness=0.68,
-                    outer_smear=0.50,
-                    ambient_warmth=0.16,
-                    swing_angle=5.2 * min(1.25, strength),
+                    flash_sharpness=0.74,
+                    outer_smear=0.46,
+                    ambient_warmth=0.14,
+                    swing_angle=4.0 * min(1.25, strength),
                     seed=seed,
                 ),
                 stage3_optics=Stage3OpticsConfig(
                     enabled=True,
-                    glow_amount=0.34 * strength * glow_guard,
-                    haze_lift=0.20 * strength * glow_guard,
-                    warmth=0.22 if warmth > 10 else 0.10,
-                    edge_fringing=0.18 * strength,
+                    glow_amount=0.28 * strength * glow_guard,
+                    haze_lift=0.12 * strength * glow_guard,
+                    warmth=0.18 if warmth > 10 else 0.08,
+                    edge_fringing=0.16 * strength,
                 ),
                 stage4_grain=Stage4GrainConfig(
                     enabled=True,
-                    grain_amount=0.36 * strength,
+                    grain_amount=0.34 * strength,
                     clumpiness=0.64,
-                    isp_smoothing=0.40,
+                    isp_smoothing=0.38,
                     shadow_weight=0.82,
                     seed=seed + 17,
                 ),
                 stage5_compression=Stage5CompressionConfig(
                     enabled=True,
-                    insta_softness=0.18 * min(1.2, strength),
-                    jpeg_quality=83,
+                    insta_softness=0.16 * min(1.2, strength),
+                    jpeg_quality=84,
                 ),
             )
-    elif warmth > 22.0 and p50 < 128.0:
+    elif not is_bright_outdoor and warmth > 22.0 and p50 < 118.0 and p85 < 188.0:
         # 3. Warm Night / Bar / Sunset / Golden Backlit Candid
         archetype = "warm_night"
         label = "Warm Evening Focus"
@@ -382,7 +400,7 @@ def analyze_and_build_auto_config(
                 jpeg_quality=83,
             ),
         )
-    elif p50 >= 122.0 or (bright_ratio > 0.22 and dark_ratio < 0.20):
+    elif is_bright_outdoor:
         # 4. Bright Daylight / High-Key Outdoor / Modern Transit / Flash Daylight
         archetype = "daylight_street"
         label = "Daylight Candid"
@@ -483,17 +501,17 @@ def analyze_and_build_auto_config(
             ),
         )
 
-    # Apply smart Flash Falloff + Dirty Bar Shadow Cast on dark/night scenes (never on bright daylight/mirror)
+    # Apply tasteful Flash Falloff + Dirty Bar Shadow Cast ONLY on dark/night scenes (never on bright daylight/mirror)
     if auto_flash_cast:
         if archetype == "flash_party":
-            cfg.stage3_optics.flash_falloff = round(0.54 * min(1.25, strength) * glow_guard, 2)
-            cfg.stage3_optics.bar_shadow_cast = round(0.52 * min(1.25, strength), 2)
+            cfg.stage3_optics.flash_falloff = round(0.36 * min(1.25, strength) * glow_guard, 2)
+            cfg.stage3_optics.bar_shadow_cast = round(0.28 * min(1.25, strength), 2)
         elif archetype == "dark_night_moody":
-            cfg.stage3_optics.flash_falloff = round(0.32 * min(1.25, strength) * glow_guard, 2)
-            cfg.stage3_optics.bar_shadow_cast = round(0.58 * min(1.25, strength), 2)
+            cfg.stage3_optics.flash_falloff = round(0.20 * min(1.25, strength) * glow_guard, 2)
+            cfg.stage3_optics.bar_shadow_cast = round(0.24 * min(1.25, strength), 2)
         elif archetype == "warm_night":
-            cfg.stage3_optics.flash_falloff = round(0.28 * min(1.25, strength) * glow_guard, 2)
-            cfg.stage3_optics.bar_shadow_cast = round(0.30 * min(1.25, strength), 2)
+            cfg.stage3_optics.flash_falloff = round(0.18 * min(1.25, strength) * glow_guard, 2)
+            cfg.stage3_optics.bar_shadow_cast = round(0.14 * min(1.25, strength), 2)
 
     # Apply subtle accidental phone tilt & off-center crop when enabled
     if auto_tilt:
@@ -521,28 +539,52 @@ def analyze_and_build_auto_config(
     )
 
 
+def _smooth_1d_hist(vals: np.ndarray, bins: int, rng: Tuple[float, float]) -> np.ndarray:
+    h, _ = np.histogram(vals, bins=bins, range=rng)
+    h = cv2.GaussianBlur(h.astype(np.float32).reshape(1, -1), (5, 1), 1.0).flatten()
+    return h / (float(np.linalg.norm(h)) + 1e-6)
+
+
 def _scene_fingerprint(rgb_u8: np.ndarray) -> np.ndarray:
-    """Compact lighting + color + spatial layout fingerprint to detect same-photoshoot / same-room slides."""
-    small = cv2.resize(rgb_u8, (96, 96), interpolation=cv2.INTER_AREA)
+    """Shift-invariant lighting + 2D chroma + coarse Lab layout fingerprint to cluster same-photoshoot slides."""
+    small = cv2.resize(rgb_u8, (128, 128), interpolation=cv2.INTER_AREA)
     hsv = cv2.cvtColor(small, cv2.COLOR_RGB2HSV)
+    lab = cv2.cvtColor(small, cv2.COLOR_RGB2LAB).astype(np.float32)
 
-    # 3D HSV color palette histogram (captures room walls, lighting cast, outfit palette)
-    hist = cv2.calcHist([hsv], [0, 1, 2], None, [8, 4, 4], [0, 180, 0, 256, 0, 256]).flatten().astype(np.float32)
-    hist /= (float(np.linalg.norm(hist)) + 1e-6)
+    # Outer border ring captures background room/pillow/hallway invariant to subject head/pose shift
+    mask = np.ones((128, 128), dtype=bool)
+    mask[26:102, 26:102] = False
+    b_lab = lab[mask]
 
-    # Low-res blurred Lab spatial grid (captures same background geometry/hallway/table)
-    lab = cv2.cvtColor(cv2.resize(small, (8, 8), interpolation=cv2.INTER_AREA), cv2.COLOR_RGB2LAB).astype(np.float32)
-    lab = (lab - np.mean(lab, axis=(0, 1), keepdims=True)) / (np.std(lab, axis=(0, 1), keepdims=True) + 1e-5)
-    spatial = lab.flatten()
-    spatial /= (float(np.linalg.norm(spatial)) + 1e-6)
+    # 2D blurred Lab chroma histogram (a, b)
+    ab_full = cv2.calcHist([lab.astype(np.uint8)], [1, 2], None, [10, 10], [88, 168, 88, 168]).astype(np.float32)
+    ab_full = cv2.GaussianBlur(ab_full, (3, 3), 0.9).flatten()
+    ab_full /= (float(np.linalg.norm(ab_full)) + 1e-6)
 
-    # Weighted concatenation (color/lighting palette weighs more so different poses in the same room still cluster!)
-    vec = np.concatenate([hist * 0.78, spatial * 0.22]).astype(np.float32)
+    l_full = _smooth_1d_hist(lab[..., 0], 14, (0.0, 256.0))
+    l_bord = _smooth_1d_hist(b_lab[:, 0], 14, (0.0, 256.0))
+    s_full = _smooth_1d_hist(hsv[..., 1], 12, (0.0, 256.0))
+
+    # Zero-centered coarse 4x4 Lab layout signature (cleanly separates dark bed vs hallway vs wood table)
+    grid = cv2.resize(lab, (4, 4), interpolation=cv2.INTER_AREA)
+    grid[..., 0] = (grid[..., 0] - 128.0) / 128.0
+    grid[..., 1] = (grid[..., 1] - 128.0) / 48.0
+    grid[..., 2] = (grid[..., 2] - 128.0) / 48.0
+    gvec = grid.flatten().astype(np.float32)
+    gvec /= (float(np.linalg.norm(gvec)) + 1e-6)
+
+    vec = np.concatenate([
+        ab_full * 0.42,
+        l_full * 0.28,
+        l_bord * 0.34,
+        s_full * 0.22,
+        gvec * 0.48,
+    ]).astype(np.float32)
     vec /= (float(np.linalg.norm(vec)) + 1e-6)
     return vec
 
 
-def cluster_carousel_scenes(images_rgb: List[np.ndarray], similarity_threshold: float = 0.77) -> List[int]:
+def cluster_carousel_scenes(images_rgb: List[np.ndarray], similarity_threshold: float = 0.88) -> List[int]:
     """Group slides from the same location/photoshoot/lighting into matching scene_group indices (0, 1, 2...).
 
     Slides in the same scene_group MUST share the same camera look, lighting, flash falloff & shadow cast,
@@ -600,27 +642,31 @@ def build_carousel_plan_local(
     # Pick ONE canonical camera/lighting recipe per scene_group so matching photos look shot on the same camera!
     group_base_cfg: Dict[int, PipelineConfig] = {}
     group_label: Dict[int, str] = {}
+    group_arch_label: Dict[int, str] = {}
 
     for idx, (gid, an) in enumerate(zip(group_ids, analyses)):
         if gid in group_base_cfg:
             continue
 
         cfg = PipelineConfig.from_dict(an.config.to_dict())
+        arch_lbl = an.archetype_label
 
         # Gentle carousel-vibe shaping (only when compatible with the actual photo lighting!)
         if carousel_vibe == "3am_dump" and an.archetype in ("flash_party", "dark_night_moody", "warm_night"):
             p = get_builtin_preset("3am_night_zoom")
             cfg = PipelineConfig.from_dict(p.to_dict())
+            arch_lbl = "3AM Night Zoom"
             if auto_flash_cast:
-                cfg.stage3_optics.flash_falloff = 0.42
-                cfg.stage3_optics.bar_shadow_cast = 0.56
+                cfg.stage3_optics.flash_falloff = 0.28
+                cfg.stage3_optics.bar_shadow_cast = 0.30
         elif carousel_vibe == "daylight_casual" and an.archetype in ("daylight_street", "indoor_candid"):
             cfg.stage3_optics.flash_falloff = 0.0
             cfg.stage3_optics.bar_shadow_cast = 0.0
             cfg.stage3_optics.haze_lift = min(cfg.stage3_optics.haze_lift, 0.05)
 
         group_base_cfg[gid] = cfg.validated()
-        group_label[gid] = f"Scene {gid + 1} · {an.archetype_label}"
+        group_arch_label[gid] = arch_lbl
+        group_label[gid] = f"Scene {gid + 1} · {arch_lbl}"
 
     # Assign cohesive configs per slide:
     # - Same scene_group => IDENTICAL base look, flash_falloff, bar_shadow_cast, glow, grain!
@@ -665,7 +711,7 @@ def build_carousel_plan_local(
             "scene_group": f"scene_{gid + 1}",
             "scene_group_label": group_label[gid],
             "scene_role": an.scene_role,
-            "archetype_label": an.archetype_label,
+            "archetype_label": group_arch_label[gid],
             "summary": an.plain_summary,
             "config": cfg.validated(),
         })

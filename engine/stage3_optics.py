@@ -86,45 +86,51 @@ def apply_stage3_optics(
         fcx = float(np.clip(focus_center[0], 0.15, 0.85))
         fcy = float(np.clip(focus_center[1] + 0.06, 0.20, 0.80))
         yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
-        dx = (xx / max(1.0, float(w)) - fcx) * (w / max(float(w), float(h))) * 1.45
-        dy = (yy / max(1.0, float(h)) - fcy) * (h / max(float(w), float(h))) * 1.15
+        dx = (xx / max(1.0, float(w)) - fcx) * (w / max(float(w), float(h))) * 1.35
+        dy = (yy / max(1.0, float(h)) - fcy) * (h / max(float(w), float(h))) * 1.10
         dist2 = dx * dx + dy * dy
 
-        flash_cone = 1.0 / (1.0 + 3.4 * dist2)
-        gain = 1.0 + ((0.38 + 1.02 * flash_cone) - 1.0) * s
+        flash_cone = 1.0 / (1.0 + 2.8 * dist2)
+        gain = 1.0 + ((0.52 + 0.78 * flash_cone) - 1.0) * s
         flash_mult = np.stack(
             [
-                gain * (1.0 - 0.02 * s * (1.0 - flash_cone)),
-                gain * (1.0 + 0.01 * s * (1.0 - flash_cone)),
-                gain * (1.0 + 0.03 * s * flash_cone),
+                gain * (1.0 - 0.015 * s * (1.0 - flash_cone)),
+                gain * (1.0 + 0.008 * s * (1.0 - flash_cone)),
+                gain * (1.0 + 0.020 * s * flash_cone),
             ],
             axis=-1,
         )
         out = out * flash_mult
         lum_f = 0.2126 * out[..., 0] + 0.7152 * out[..., 1] + 0.0722 * out[..., 2]
-        spec = (np.clip((lum_f - 0.44) / 0.56, 0.0, 1.0) ** 2.0) * flash_cone
-        out = out + spec[..., np.newaxis] * (0.14 * s)
-        # Soft shoulder rolloff so bright flash hotspots stay photographic, never flat clipped
-        out = out / (1.0 + 0.18 * np.maximum(out - 0.88, 0.0))
+        spec = (np.clip((lum_f - 0.48) / 0.52, 0.0, 1.0) ** 2.0) * flash_cone
+        out = out + spec[..., np.newaxis] * (0.11 * s)
+        out = out / (1.0 + 0.16 * np.maximum(out - 0.88, 0.0))
 
-    # 0B. Dirty Bar / Club Shadow Cast (murky green-cool shadows + warm tungsten highs + faint side LED spill)
+    # 0B. Dirty Bar / Club Shadow Cast (calibrated dark charcoal-olive shadows + warm highlight split)
     if cfg.bar_shadow_cast > 0.01:
         b = cfg.bar_shadow_cast
         lum_b = 0.2126 * out[..., 0] + 0.7152 * out[..., 1] + 0.0722 * out[..., 2]
-        sh = np.clip(1.0 - lum_b * 3.0, 0.0, 1.0)[..., np.newaxis]
-        hi = np.clip((lum_b - 0.28) * 1.6, 0.0, 1.0)[..., np.newaxis]
+        sh = np.clip(1.0 - lum_b * 3.4, 0.0, 1.0)[..., np.newaxis]
+        hi = np.clip((lum_b - 0.30) * 1.6, 0.0, 1.0)[..., np.newaxis]
 
-        shadow_tint = np.array([-0.010, 0.016, 0.012], dtype=np.float32) * b
-        high_mult = np.array([1.0 + 0.14 * b, 1.0 + 0.03 * b, 1.0 - 0.16 * b], dtype=np.float32)
+        # Multiplicative dark-shadow shift + subtle calibrated linear veil (avoids cyan/teal fog in blacks!)
+        sh_mult = np.array([1.0 - 0.14 * b, 1.0 + 0.05 * b, 1.0 + 0.03 * b], dtype=np.float32)
+        hi_mult = np.array([1.0 + 0.08 * b, 1.0 + 0.02 * b, 1.0 - 0.09 * b], dtype=np.float32)
+        shadow_veil = np.array([-0.0018, 0.0034, 0.0022], dtype=np.float32) * b
 
         xx_lin = np.linspace(0.0, 1.0, w, dtype=np.float32)[np.newaxis, :, np.newaxis]
-        side_spill = (np.clip((xx_lin - 0.55) / 0.45, 0.0, 1.0) ** 1.8)
-        neon_cast = np.array([0.008, 0.012, 0.032], dtype=np.float32) * b
+        side_spill = (np.clip((xx_lin - 0.58) / 0.42, 0.0, 1.0) ** 2.0)
+        neon_cast = np.array([0.0020, 0.0038, 0.0095], dtype=np.float32) * b
 
+        color_mult = (
+            1.0
+            + sh * (sh_mult[np.newaxis, np.newaxis, :] - 1.0)
+            + hi * (hi_mult[np.newaxis, np.newaxis, :] - 1.0)
+        )
         out = (
-            out * ((1.0 - hi) + high_mult[np.newaxis, np.newaxis, :] * hi)
-            + sh * shadow_tint[np.newaxis, np.newaxis, :]
-            + side_spill * (0.4 + 0.6 * sh) * neon_cast[np.newaxis, np.newaxis, :]
+            out * color_mult
+            + sh * shadow_veil[np.newaxis, np.newaxis, :]
+            + side_spill * (0.35 + 0.65 * sh) * neon_cast[np.newaxis, np.newaxis, :]
         )
         out = np.maximum(out, 0.0)
 
