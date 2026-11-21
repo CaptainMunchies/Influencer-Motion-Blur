@@ -49,14 +49,14 @@ Return ONLY valid JSON matching this exact schema (all coordinates normalized 0 
     }
   ],
   "recommended_settings": {
-    "motion_method": "flash_drag" | "handheld_shake" | "pivot_swing",
+    "motion_method": "flash_drag" | "handheld_shake" | "pivot_swing" | "camera_swirl",
     "direction_angle": 20,
-    "shake_amount": 12.0,
-    "flash_sharpness": 0.70,
-    "outer_smear": 0.70,
-    "focus_radius": 2.0,
-    "glow_amount": 0.38,
-    "grain_amount": 0.36
+    "shake_amount": 9.0,
+    "flash_sharpness": 0.74,
+    "outer_smear": 0.62,
+    "focus_radius": 1.8,
+    "glow_amount": 0.30,
+    "grain_amount": 0.28
   }
 }
 
@@ -67,7 +67,8 @@ Rules for high accuracy:
 4. Pick `recommended_settings.motion_method`:
    - "flash_drag" for night/indoor flash or party shots where face stays sharp and background/arms trail.
    - "pivot_swing" when one or both hands/arms are clearly raised, waving, fixing hair, or gesturing against a mostly still background.
-   - "handheld_shake" for casual mirror selfies or dim-light snapshots where the whole camera gently moved.
+   - "camera_swirl" for club, nightlife, neon street, or high-energy candid moments that suit a wrist-flick shutter swirl.
+   - "handheld_shake" for casual mirror selfies, gym snaps, or cozy indoor moments where the whole phone gently moved.
 5. Output raw JSON only — no markdown fences, no commentary."""
 
 
@@ -507,7 +508,7 @@ def apply_director_guidance_to_config(
     if apply_slider_recommendations and result.recommended_settings:
         rec = result.recommended_settings
         method = rec.get("motion_method")
-        if method in ("flash_drag", "handheld_shake", "pivot_swing"):
+        if method in ("flash_drag", "handheld_shake", "pivot_swing", "camera_swirl"):
             cfg.stage2_motion.method = method
         if "direction_angle" in rec:
             cfg.stage2_motion.direction_angle = float(rec["direction_angle"])

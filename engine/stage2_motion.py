@@ -150,6 +150,7 @@ class MotionProvider(ABC):
         brush: Optional[UserBrushMask] = None,
         color_cfg: Optional[OpticalColorConfig] = None,
         cloud_cfg: Optional[CloudAIConfig] = None,
+        focus_center: Tuple[float, float] = (0.50, 0.32),
     ) -> MotionResult:
         raise NotImplementedError
 
@@ -166,6 +167,7 @@ class LocalHandheldShakeProvider(MotionProvider):
         brush: Optional[UserBrushMask] = None,
         color_cfg: Optional[OpticalColorConfig] = None,
         cloud_cfg: Optional[CloudAIConfig] = None,
+        focus_center: Tuple[float, float] = (0.50, 0.32),
     ) -> MotionResult:
         if cfg.shake_amount <= 0.25:
             return MotionResult(linear_rgb=linear_rgb.copy(), provider_used=self.name)
@@ -224,6 +226,7 @@ class LocalFlashDragProvider(MotionProvider):
         brush: Optional[UserBrushMask] = None,
         color_cfg: Optional[OpticalColorConfig] = None,
         cloud_cfg: Optional[CloudAIConfig] = None,
+        focus_center: Tuple[float, float] = (0.50, 0.32),
     ) -> MotionResult:
         if cfg.shake_amount <= 0.25 and cfg.outer_smear <= 0.02:
             return MotionResult(linear_rgb=linear_rgb.copy(), provider_used=self.name)
@@ -232,22 +235,22 @@ class LocalFlashDragProvider(MotionProvider):
         scale = min(h, w) / 1080.0
         span_px = max(2.0, cfg.shake_amount * scale)
 
-        # 1. Flash burst exposure: mostly crisp, with microscopic 0.8px optical softness
+        # 1. Flash burst exposure: mostly crisp, with microscopic optical unity
         flash_exposure = linear_rgb
 
         # 2. Curved ambient shutter-drag exposure (trailing behind the flash burst)
         psf_ambient = generate_curved_shake_psf(
-            span_px=span_px * 1.35,
+            span_px=span_px * 1.30,
             curvature=max(0.45, cfg.curvature),
-            ghost_strength=min(1.0, cfg.ghost_strength + 0.20),
+            ghost_strength=min(1.0, cfg.ghost_strength + 0.18),
             direction_angle_deg=cfg.direction_angle,
             seed=cfg.seed,
         )
         # Shift ambient drag slightly off-center like rear-curtain flash trail
         ambient_exposure = convolve_linear_rgb(linear_rgb, psf_ambient)
         rad = np.deg2rad(cfg.direction_angle)
-        dx = float(np.cos(rad) * span_px * 0.22)
-        dy = float(np.sin(rad) * span_px * 0.22)
+        dx = float(np.cos(rad) * span_px * 0.20)
+        dy = float(np.sin(rad) * span_px * 0.20)
         M = np.array([[1.0, 0.0, dx], [0.0, 1.0, dy]], dtype=np.float32)
         ambient_exposure = cv2.warpAffine(
             ambient_exposure, M, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT_101
@@ -256,26 +259,27 @@ class LocalFlashDragProvider(MotionProvider):
         # Subtle warm tungsten/club ambient color shift on the dragged ambient exposure
         if cfg.ambient_warmth > 1e-3:
             w_t = cfg.ambient_warmth
-            tint = np.array([1.0 + 0.28 * w_t, 1.0 + 0.05 * w_t, 1.0 - 0.22 * w_t], dtype=np.float32)
+            tint = np.array([1.0 + 0.24 * w_t, 1.0 + 0.04 * w_t, 1.0 - 0.18 * w_t], dtype=np.float32)
             ambient_exposure = ambient_exposure * tint[np.newaxis, np.newaxis, :]
 
         # Physical linear-light blend: flash_sharpness * I_flash + (1 - flash_sharpness) * I_ambient
         fw = float(cfg.flash_sharpness)
         blended = fw * flash_exposure + (1.0 - fw) * ambient_exposure
 
-        # 3. Localized outer-limb / edge motion smear (keeps face frozen, arms/hands trail!)
+        # 3. Localized outer-limb / edge motion smear anchored around the REAL detected subject center!
         if cfg.outer_smear > 0.02:
-            outer_mask = build_outer_limb_mask((h, w), brush=brush)
+            outer_mask = build_outer_limb_mask(
+                (h, w), brush=brush, face_cx=focus_center[0], face_cy=focus_center[1]
+            )
             psf_limb = generate_curved_shake_psf(
-                span_px=max(4.0, span_px * (1.6 + 1.1 * cfg.outer_smear)),
-                curvature=min(1.0, cfg.curvature + 0.20),
-                ghost_strength=min(1.0, cfg.ghost_strength * 0.75),
-                direction_angle_deg=cfg.direction_angle + 22.0,
+                span_px=max(3.5, span_px * (1.45 + 0.95 * cfg.outer_smear)),
+                curvature=min(1.0, cfg.curvature + 0.18),
+                ghost_strength=min(1.0, cfg.ghost_strength * 0.72),
+                direction_angle_deg=cfg.direction_angle + 20.0,
                 seed=cfg.seed + 19,
             )
             limb_smeared = convolve_linear_rgb(linear_rgb, psf_limb)
-            # Blend flash-drag base with heavier outer-limb smear where arms/edges live
-            limb_w = (outer_mask * cfg.outer_smear * 0.82)[..., np.newaxis]
+            limb_w = (outer_mask * cfg.outer_smear * 0.78)[..., np.newaxis]
             blended = blended * (1.0 - limb_w) + limb_smeared * limb_w
 
         # Respect explicit "Keep Sharp" brush strokes on top
@@ -340,6 +344,7 @@ class LocalPivotSwingProvider(MotionProvider):
         brush: Optional[UserBrushMask] = None,
         color_cfg: Optional[OpticalColorConfig] = None,
         cloud_cfg: Optional[CloudAIConfig] = None,
+        focus_center: Tuple[float, float] = (0.50, 0.32),
     ) -> MotionResult:
         if cfg.swing_intensity <= 0.02 or cfg.swing_angle <= 0.3:
             return MotionResult(linear_rgb=linear_rgb.copy(), provider_used=self.name)
@@ -361,7 +366,7 @@ class LocalPivotSwingProvider(MotionProvider):
                     linear_rgb,
                     pivot_xy=(px, py),
                     max_angle_deg=ang * scale_ang,
-                    steps=15,
+                    steps=19,
                     ghost_strength=cfg.ghost_strength,
                 )
                 poly_pts = piv.get("polygon")
@@ -387,9 +392,10 @@ class LocalPivotSwingProvider(MotionProvider):
 
             return MotionResult(linear_rgb=np.maximum(out, 0.0).astype(np.float32), provider_used=f"{self.name}:ai_pivots")
 
-        # Left & right shoulder/elbow pivot points for natural outward arm-swing arcs
-        left_pivot = (w * 0.36, h * 0.44)
-        right_pivot = (w * 0.64, h * 0.44)
+        # Left & right shoulder/elbow pivot points anchored around the real detected subject center!
+        fcx, fcy = focus_center
+        left_pivot = (w * max(0.12, fcx - 0.14), h * min(0.85, fcy + 0.12))
+        right_pivot = (w * min(0.88, fcx + 0.14), h * min(0.85, fcy + 0.12))
 
         # If user painted an explicit blur region, anchor pivot slightly inward toward body center
         if brush is not None and brush.has_blur:
@@ -417,10 +423,10 @@ class LocalPivotSwingProvider(MotionProvider):
 
         # Automatic dual-arm arc blur (left arm swings counter-clockwise, right arm clockwise)
         arc_left = self._rotational_arc_blur(
-            linear_rgb, left_pivot, max_angle_deg=cfg.swing_angle, steps=13, ghost_strength=cfg.ghost_strength
+            linear_rgb, left_pivot, max_angle_deg=cfg.swing_angle, steps=17, ghost_strength=cfg.ghost_strength
         )
         arc_right = self._rotational_arc_blur(
-            linear_rgb, right_pivot, max_angle_deg=-cfg.swing_angle, steps=13, ghost_strength=cfg.ghost_strength
+            linear_rgb, right_pivot, max_angle_deg=-cfg.swing_angle, steps=17, ghost_strength=cfg.ghost_strength
         )
 
         # Smooth left/right split so left side uses left-shoulder pivot, right side uses right-shoulder pivot
@@ -429,8 +435,8 @@ class LocalPivotSwingProvider(MotionProvider):
         right_w = (right_w * right_w * (3.0 - 2.0 * right_w))[..., np.newaxis]
         arc_combined = arc_left * (1.0 - right_w) + arc_right * right_w
 
-        # Mask protects face & torso, applies arm-swing arc smoothly to outer arms/hands
-        outer_mask = build_outer_limb_mask((h, w), brush=brush)
+        # Mask protects face & torso around real subject center, applies arm-swing arc smoothly to outer limbs
+        outer_mask = build_outer_limb_mask((h, w), brush=brush, face_cx=fcx, face_cy=fcy)
         wm = (outer_mask * cfg.swing_intensity)[..., np.newaxis]
         out = linear_rgb * (1.0 - wm) + arc_combined * wm
 
@@ -455,6 +461,85 @@ class LocalPivotSwingProvider(MotionProvider):
         return MotionResult(linear_rgb=np.maximum(out, 0.0).astype(np.float32), provider_used=self.name)
 
 
+class LocalCameraSwirlProvider(MotionProvider):
+    """Method D: Camera Swirl / Whip-Pan Flick.
+
+    Replicates the viral Instagram / TikTok "flick or swirl your iPhone as you tap
+    the shutter" slow-shutter look: anchors an initial sharp flash/dwell frame around
+    the detected subject center while sweeping the camera in a combined curved lateral
+    drift + gentle wrist-twist rotational arc so city/club lights and outer edges
+    streak dynamically while the subject's face stays recognizable.
+    """
+
+    name = "camera_swirl"
+
+    def apply(
+        self,
+        linear_rgb: np.ndarray,
+        cfg: Stage2MotionConfig,
+        brush: Optional[UserBrushMask] = None,
+        color_cfg: Optional[OpticalColorConfig] = None,
+        cloud_cfg: Optional[CloudAIConfig] = None,
+        focus_center: Tuple[float, float] = (0.50, 0.32),
+    ) -> MotionResult:
+        if cfg.shake_amount <= 0.25 and cfg.swing_angle <= 0.2:
+            return MotionResult(linear_rgb=linear_rgb.copy(), provider_used=self.name)
+
+        h, w = linear_rgb.shape[:2]
+        scale = min(h, w) / 1080.0
+        px = float(focus_center[0]) * (w - 1)
+        py = float(focus_center[1]) * (h - 1)
+
+        rng = np.random.default_rng(int(cfg.seed) & 0xFFFFFFFF)
+        sign = 1.0 if rng.random() > 0.5 else -1.0
+        max_rot = max(1.2, min(10.0, cfg.swing_angle * 0.55)) * sign
+        shift_px = max(2.0, cfg.shake_amount * scale * 1.15)
+        rad = np.deg2rad(cfg.direction_angle)
+        dx_total = float(np.cos(rad) * shift_px)
+        dy_total = float(np.sin(rad) * shift_px)
+
+        steps = 21
+        t = np.linspace(0.0, 1.0, steps, dtype=np.float32)
+        # Curved whip acceleration + strong initial anchor spike (keeps face readable!)
+        ease = t * t * (3.0 - 2.0 * t)
+        bend = np.sin(np.pi * t) * (shift_px * 0.28 * cfg.curvature)
+        nx, ny = -float(np.sin(rad)), float(np.cos(rad))
+
+        # Dwell weight: heavy anchor near t=0 (flash/start instant) + smooth sweeping trail + tiny tail ghost
+        anchor_w = 1.8 + 4.0 * cfg.flash_sharpness
+        weights = (1.0 - 0.50 * t) + anchor_w * np.exp(-((t / 0.11) ** 2)) + (1.4 * cfg.ghost_strength) * np.exp(-(((1.0 - t) / 0.14) ** 2))
+        weights = (weights / weights.sum()).astype(np.float32)
+
+        acc = np.zeros_like(linear_rgb, dtype=np.float32)
+        for ti, ei, bi, wt in zip(t, ease, bend, weights):
+            ang = float(max_rot * ei)
+            tx = float(dx_total * ei + nx * bi)
+            ty = float(dy_total * ei + ny * bi)
+            if abs(ang) < 0.04 and abs(tx) < 0.15 and abs(ty) < 0.15:
+                acc += linear_rgb * wt
+                continue
+            M = cv2.getRotationMatrix2D((px, py), ang, 1.0)
+            M[0, 2] += tx
+            M[1, 2] += ty
+            warped = cv2.warpAffine(
+                linear_rgb,
+                M,
+                (w, h),
+                flags=cv2.INTER_LINEAR,
+                borderMode=cv2.BORDER_REFLECT_101,
+            )
+            acc += warped * wt
+
+        # Blend slightly crisper core around real subject face so eyes/expression always pop
+        outer_mask = build_outer_limb_mask((h, w), brush=brush, face_cx=focus_center[0], face_cy=focus_center[1])
+        core_sharp = (1.0 - outer_mask) * (0.35 + 0.35 * cfg.flash_sharpness)
+        if brush is not None and brush.has_sharp:
+            core_sharp = np.maximum(core_sharp, brush.keep_sharp * 0.88)
+        cs = core_sharp[..., np.newaxis]
+        out = acc * (1.0 - cs) + linear_rgb * cs
+        return MotionResult(linear_rgb=np.maximum(out, 0.0).astype(np.float32), provider_used=self.name)
+
+
 class CloudAIMotionProvider(MotionProvider):
     """Optional Cloud AI motion provider (fal.ai / Replicate REST interface).
 
@@ -471,6 +556,7 @@ class CloudAIMotionProvider(MotionProvider):
         brush: Optional[UserBrushMask] = None,
         color_cfg: Optional[OpticalColorConfig] = None,
         cloud_cfg: Optional[CloudAIConfig] = None,
+        focus_center: Tuple[float, float] = (0.50, 0.32),
     ) -> MotionResult:
         cc = (cloud_cfg or CloudAIConfig()).validated()
         if not cc.api_key:
@@ -559,6 +645,7 @@ MOTION_PROVIDERS: Dict[str, MotionProvider] = {
     "handheld_shake": LocalHandheldShakeProvider(),
     "flash_drag": LocalFlashDragProvider(),
     "pivot_swing": LocalPivotSwingProvider(),
+    "camera_swirl": LocalCameraSwirlProvider(),
     "cloud_ai": CloudAIMotionProvider(),
 }
 
@@ -574,6 +661,7 @@ def apply_stage2_motion(
     brush: Optional[UserBrushMask] = None,
     color_cfg: Optional[OpticalColorConfig] = None,
     cloud_cfg: Optional[CloudAIConfig] = None,
+    focus_center: Tuple[float, float] = (0.50, 0.32),
 ) -> MotionResult:
     """Dispatch Stage 2 motion processing to the selected pluggable provider."""
     cfg = cfg.validated()
@@ -587,4 +675,5 @@ def apply_stage2_motion(
         brush=brush,
         color_cfg=color_cfg,
         cloud_cfg=cloud_cfg,
+        focus_center=focus_center,
     )

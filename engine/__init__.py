@@ -17,8 +17,9 @@ from .ai_director import (
     direct_photo_with_ai,
     list_available_vision_models,
 )
+from .auto_scene import AutoSceneAnalysis, analyze_and_build_auto_config
 from .masks import UserBrushMask, decode_rgba_brush_mask
-from .pipeline import PipelineResult, process_image, run_pipeline
+from .pipeline import PipelineResult, auto_process_image, process_image, run_pipeline
 from .presets import (
     BUILTIN_PRESETS,
     get_builtin_preset,
@@ -42,6 +43,7 @@ from .stage2_motion import MotionProvider, register_motion_provider
 
 __all__ = [
     "AIDirectorResult",
+    "AutoSceneAnalysis",
     "BUILTIN_PRESETS",
     "CloudAIConfig",
     "MotionProvider",
@@ -56,7 +58,9 @@ __all__ = [
     "Stage5CompressionConfig",
     "UserBrushMask",
     "VisionDirectorConfig",
+    "analyze_and_build_auto_config",
     "apply_director_guidance_to_config",
+    "auto_process_image",
     "decode_rgba_brush_mask",
     "direct_photo_with_ai",
     "get_builtin_preset",

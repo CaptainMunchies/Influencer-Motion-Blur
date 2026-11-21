@@ -10,7 +10,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Literal, Optional
 
 FocusFalloffMode = Literal["uniform", "face_center", "edges"]
-MotionMethod = Literal["handheld_shake", "flash_drag", "pivot_swing", "cloud_ai"]
+MotionMethod = Literal["handheld_shake", "flash_drag", "pivot_swing", "camera_swirl", "cloud_ai"]
 CloudProviderName = Literal["fal", "replicate"]
 VisionProviderName = Literal["kie", "gemini", "openai", "openrouter"]
 
@@ -130,7 +130,7 @@ class Stage2MotionConfig:
     def validated(self) -> "Stage2MotionConfig":
         method = (
             self.method
-            if self.method in ("handheld_shake", "flash_drag", "pivot_swing", "cloud_ai")
+            if self.method in ("handheld_shake", "flash_drag", "pivot_swing", "camera_swirl", "cloud_ai")
             else "handheld_shake"
         )
         clean_pivots: List[Dict[str, Any]] = []

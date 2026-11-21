@@ -17,7 +17,9 @@ from engine import (
     AIDirectorResult,
     CloudAIConfig,
     PipelineConfig,
+    analyze_and_build_auto_config,
     apply_director_guidance_to_config,
+    auto_process_image,
     get_builtin_preset,
     list_builtin_presets,
     load_preset_json,
@@ -65,7 +67,7 @@ def _make_synthetic_portrait(w: int = 960, h: int = 1200) -> np.ndarray:
 def test_presets_and_determinism() -> None:
     img = _make_synthetic_portrait(720, 900)
     presets = list_builtin_presets()
-    assert len(presets) == 3
+    assert len(presets) == 6
 
     for p in presets:
         cfg = get_builtin_preset(p["id"])
@@ -76,6 +78,16 @@ def test_presets_and_determinism() -> None:
         assert r1.final.shape == img.shape
         assert r1.final.dtype == np.uint8
         print(f"  [OK] Preset '{cfg.name}' deterministic ({r1.total_ms:.0f} ms) timings={r1.timings_ms}")
+
+
+def test_auto_scene_engine() -> None:
+    img = _make_synthetic_portrait(720, 900)
+    out, analysis = auto_process_image(img, strength=1.0)
+    assert out.shape == img.shape
+    assert analysis.archetype in ("flash_party", "dark_night_moody", "warm_night", "indoor_candid", "daylight_street")
+    assert 0.2 <= analysis.subject_center[0] <= 0.8
+    assert 0.15 <= analysis.subject_center[1] <= 0.72
+    print(f"  [OK] Layer-1 Auto-Match verified: {analysis.archetype_label} subj={analysis.subject_center}")
 
 
 def test_independent_stage_toggles() -> None:
@@ -96,7 +108,7 @@ def test_independent_stage_toggles() -> None:
 
 def test_motion_methods_and_cloud_fallback() -> None:
     img = _make_synthetic_portrait(600, 750)
-    for method in ("handheld_shake", "flash_drag", "pivot_swing", "cloud_ai"):
+    for method in ("handheld_shake", "flash_drag", "pivot_swing", "camera_swirl", "cloud_ai"):
         cfg = get_builtin_preset("flash_party_blur")
         cfg.stage2_motion.method = method  # type: ignore[assignment]
         res = run_pipeline(img, cfg, cloud_config=CloudAIConfig(api_key=""))
@@ -131,7 +143,7 @@ def test_fastapi_endpoints() -> None:
     assert client.get("/").status_code == 200
 
     presets = client.get("/api/presets").json()
-    assert len(presets["builtin"]) == 3
+    assert len(presets["builtin"]) == 6
 
     # Upload a test JPEG
     img = _make_synthetic_portrait(800, 1000)
@@ -142,6 +154,12 @@ def test_fastapi_endpoints() -> None:
     up = client.post("/api/upload", files={"file": ("test.jpg", buf.getvalue(), "image/jpeg")})
     assert up.status_code == 200
     image_id = up.json()["image_id"]
+
+    # Layer 1 Auto-Process endpoint
+    ap = client.post("/api/auto-process", json={"image_id": image_id, "strength": 1.0})
+    assert ap.status_code == 200
+    ap_data = ap.json()
+    assert "analysis" in ap_data and "stage5" in ap_data["stages"]
 
     cfg_dict = presets["builtin"][0]["config"]
     proc = client.post("/api/process", json={"image_id": image_id, "config": cfg_dict})
@@ -235,6 +253,7 @@ def test_ai_director_rasterize_and_pivots() -> None:
 if __name__ == "__main__":
     print("Running Influencer Blur Lab test suite...")
     test_presets_and_determinism()
+    test_auto_scene_engine()
     test_independent_stage_toggles()
     test_motion_methods_and_cloud_fallback()
     test_brush_mask_and_preset_json()

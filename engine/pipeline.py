@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional, Tuple, Union
 
 import numpy as np
 from PIL import Image
@@ -111,6 +111,7 @@ def run_pipeline(
         brush=resolved_brush,
         color_cfg=cfg.color,
         cloud_cfg=cloud_config,
+        focus_center=(cfg.stage1_focus.focus_center_x, cfg.stage1_focus.focus_center_y),
     )
     lin_s2 = motion_res.linear_rgb
     if motion_res.note:
@@ -165,3 +166,16 @@ def process_image(
         return_intermediates=False,
     )
     return res.final
+
+
+def auto_process_image(
+    image: ImageInput,
+    strength: float = 1.0,
+) -> Tuple[np.ndarray, "AutoSceneAnalysis"]:
+    """Zero-config Layer-1 SaaS API: automatically analyzes any social photo and applies tasteful blur."""
+    from .auto_scene import analyze_and_build_auto_config
+
+    rgb = _coerce_rgb_u8(image)
+    analysis = analyze_and_build_auto_config(rgb, strength=strength)
+    res = run_pipeline(rgb, analysis.config, return_intermediates=False)
+    return res.final, analysis

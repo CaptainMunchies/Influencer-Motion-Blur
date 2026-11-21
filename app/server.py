@@ -31,6 +31,7 @@ from engine import (
     PipelineConfig,
     SUGGESTED_MODELS,
     VisionDirectorConfig,
+    analyze_and_build_auto_config,
     apply_director_guidance_to_config,
     direct_photo_with_ai,
     list_available_vision_models,
@@ -62,11 +63,19 @@ app.add_middleware(
 
 
 class UploadedPhoto:
-    def __init__(self, image_id: str, filename: str, full_rgb: np.ndarray, preview_rgb: np.ndarray):
+    def __init__(
+        self,
+        image_id: str,
+        filename: str,
+        full_rgb: np.ndarray,
+        preview_rgb: np.ndarray,
+        subject_center: tuple[float, float] = (0.50, 0.34),
+    ):
         self.image_id = image_id
         self.filename = filename
         self.full_rgb = full_rgb
         self.preview_rgb = preview_rgb
+        self.subject_center = subject_center
         self.created_at = time.time()
 
 
@@ -236,6 +245,14 @@ class AIDirectRequest(BaseModel):
     config: Dict[str, Any]
     apply_sliders: bool = False
     user_goal: str = ""
+
+
+class AutoProcessRequest(BaseModel):
+    image_id: str
+    strength: float = 1.0
+    seed_offset: int = 0
+    use_ai_vision: bool = False
+    brush_data_url: Optional[str] = None
 
 
 class AIModelsRequest(BaseModel):
@@ -421,11 +438,13 @@ async def upload_photo(file: UploadFile = File(...)) -> Dict[str, Any]:
         preview_rgb = full_rgb.copy()
 
     image_id = uuid.uuid4().hex[:12]
+    initial_analysis = analyze_and_build_auto_config(preview_rgb, strength=1.0)
     PHOTOS[image_id] = UploadedPhoto(
         image_id=image_id,
         filename=file.filename or "photo.jpg",
         full_rgb=full_rgb,
         preview_rgb=preview_rgb,
+        subject_center=initial_analysis.subject_center,
     )
     _prune_caches()
 
@@ -438,7 +457,74 @@ async def upload_photo(file: UploadFile = File(...)) -> Dict[str, Any]:
         "full_height": fh,
         "preview_width": pw,
         "preview_height": ph,
+        "subject_center": list(initial_analysis.subject_center),
         "original_url": orig_url,
+    }
+
+
+@app.post("/api/auto-process")
+def auto_process_preview(req: AutoProcessRequest) -> Dict[str, Any]:
+    """Layer 1 Zero-Effort Endpoint: analyzes the photo & runs the optimal scene-matched recipe."""
+    photo = PHOTOS.get(req.image_id)
+    if photo is None:
+        raise HTTPException(status_code=404, detail="Photo session expired. Please upload your photo again.")
+
+    analysis = analyze_and_build_auto_config(photo.preview_rgb, strength=req.strength)
+    cfg = analysis.config
+    if req.seed_offset:
+        cfg.stage2_motion.seed = int(cfg.stage2_motion.seed + req.seed_offset)
+        cfg.stage4_grain.seed = int(cfg.stage4_grain.seed + req.seed_offset)
+
+    brush_rgba = _decode_brush_data_url(req.brush_data_url)
+    ai_brush_url: Optional[str] = None
+    ai_note: str = ""
+
+    # Optional hands-free Kie.ai / Vision AI upgrade when enabled & API key is saved
+    if req.use_ai_vision:
+        v_cfg = _load_vision_settings()
+        if v_cfg.api_key:
+            try:
+                dir_res = direct_photo_with_ai(photo.preview_rgb, v_cfg)
+                cfg = apply_director_guidance_to_config(cfg, dir_res, apply_slider_recommendations=False)
+                brush_rgba = dir_res.brush_rgba
+                ai_brush_url = _encode_rgba_png_data_url(dir_res.brush_rgba)
+                ai_note = f"AI ({dir_res.model_used}): {dir_res.scene_summary}"
+            except Exception as exc:
+                ai_note = f"Local auto-match used (Vision AI skipped: {exc})"
+
+    cloud_cfg = _load_cloud_settings()
+    res = run_pipeline(
+        image=photo.preview_rgb,
+        config=cfg,
+        brush_rgba=brush_rgba,
+        cloud_config=cloud_cfg,
+        return_intermediates=True,
+    )
+    stage_urls = {
+        key: _store_render(img, quality=94 if key != "stage5" else 96)
+        for key, img in res.stages.items()
+    }
+    notes = list(res.notes)
+    if ai_note:
+        notes.insert(0, ai_note)
+
+    return {
+        "image_id": req.image_id,
+        "analysis": {
+            "archetype": analysis.archetype,
+            "archetype_label": analysis.archetype_label,
+            "plain_summary": analysis.plain_summary,
+            "subject_center": list(analysis.subject_center),
+            "existing_sharpness": round(analysis.existing_sharpness, 1),
+            "sharpness_scale": round(analysis.sharpness_scale, 2),
+        },
+        "brush_data_url": ai_brush_url,
+        "stages": stage_urls,
+        "timings_ms": res.timings_ms,
+        "total_ms": res.total_ms,
+        "motion_provider": res.motion_provider,
+        "notes": notes,
+        "config": cfg.to_dict(),
     }
 
 
