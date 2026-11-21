@@ -155,6 +155,7 @@ def analyze_and_build_auto_config(
     scale_m = 720.0 / max(h, w)
     mw, mh = max(64, int(round(w * scale_m))), max(64, int(round(h * scale_m)))
     work = cv2.resize(rgb_u8, (mw, mh), interpolation=cv2.INTER_AREA) if scale_m < 0.98 else rgb_u8
+    mh, mw = work.shape[:2]
 
     gray = cv2.cvtColor(work, cv2.COLOR_RGB2GRAY).astype(np.float32)
     hsv = cv2.cvtColor(work, cv2.COLOR_RGB2HSV).astype(np.float32)
