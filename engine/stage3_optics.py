@@ -80,47 +80,47 @@ def apply_stage3_optics(
     h, w = out.shape[:2]
     short_edge = float(min(h, w))
 
-    # 0A. Direct On-Camera Phone Flash Falloff (inverse-square foreground cone + specular sheen)
+    # 0A. Direct On-Camera Phone Flash Falloff (gentle inverse-square foreground cone + subtle specular sheen)
     if cfg.flash_falloff > 0.01:
         s = cfg.flash_falloff
         fcx = float(np.clip(focus_center[0], 0.15, 0.85))
         fcy = float(np.clip(focus_center[1] + 0.06, 0.20, 0.80))
         yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
-        dx = (xx / max(1.0, float(w)) - fcx) * (w / max(float(w), float(h))) * 1.35
-        dy = (yy / max(1.0, float(h)) - fcy) * (h / max(float(w), float(h))) * 1.10
+        dx = (xx / max(1.0, float(w)) - fcx) * (w / max(float(w), float(h))) * 1.28
+        dy = (yy / max(1.0, float(h)) - fcy) * (h / max(float(w), float(h))) * 1.05
         dist2 = dx * dx + dy * dy
 
-        flash_cone = 1.0 / (1.0 + 2.8 * dist2)
-        gain = 1.0 + ((0.52 + 0.78 * flash_cone) - 1.0) * s
+        flash_cone = 1.0 / (1.0 + 2.4 * dist2)
+        # Dialed-down natural phone flash falloff (~+14% center / -26% deep corners at 100%, whisper-subtle at 20-30%)
+        gain = 1.0 + ((0.72 + 0.42 * flash_cone) - 1.0) * s
         flash_mult = np.stack(
             [
-                gain * (1.0 - 0.015 * s * (1.0 - flash_cone)),
-                gain * (1.0 + 0.008 * s * (1.0 - flash_cone)),
-                gain * (1.0 + 0.020 * s * flash_cone),
+                gain * (1.0 - 0.008 * s * (1.0 - flash_cone)),
+                gain * (1.0 + 0.004 * s * (1.0 - flash_cone)),
+                gain * (1.0 + 0.012 * s * flash_cone),
             ],
             axis=-1,
         )
         out = out * flash_mult
         lum_f = 0.2126 * out[..., 0] + 0.7152 * out[..., 1] + 0.0722 * out[..., 2]
-        spec = (np.clip((lum_f - 0.48) / 0.52, 0.0, 1.0) ** 2.0) * flash_cone
-        out = out + spec[..., np.newaxis] * (0.11 * s)
-        out = out / (1.0 + 0.16 * np.maximum(out - 0.88, 0.0))
+        spec = (np.clip((lum_f - 0.52) / 0.48, 0.0, 1.0) ** 2.0) * flash_cone
+        out = out + spec[..., np.newaxis] * (0.06 * s)
+        out = out / (1.0 + 0.12 * np.maximum(out - 0.90, 0.0))
 
-    # 0B. Dirty Bar / Club Shadow Cast (calibrated dark charcoal-olive shadows + warm highlight split)
+    # 0B. Dirty Bar / Club Shadow Cast (subtle organic dark shadow tone + faint warm highlight split)
     if cfg.bar_shadow_cast > 0.01:
         b = cfg.bar_shadow_cast
         lum_b = 0.2126 * out[..., 0] + 0.7152 * out[..., 1] + 0.0722 * out[..., 2]
-        sh = np.clip(1.0 - lum_b * 3.4, 0.0, 1.0)[..., np.newaxis]
-        hi = np.clip((lum_b - 0.30) * 1.6, 0.0, 1.0)[..., np.newaxis]
+        sh = np.clip(1.0 - lum_b * 3.8, 0.0, 1.0)[..., np.newaxis]
+        hi = np.clip((lum_b - 0.34) * 1.6, 0.0, 1.0)[..., np.newaxis]
 
-        # Multiplicative dark-shadow shift + subtle calibrated linear veil (avoids cyan/teal fog in blacks!)
-        sh_mult = np.array([1.0 - 0.14 * b, 1.0 + 0.05 * b, 1.0 + 0.03 * b], dtype=np.float32)
-        hi_mult = np.array([1.0 + 0.08 * b, 1.0 + 0.02 * b, 1.0 - 0.09 * b], dtype=np.float32)
-        shadow_veil = np.array([-0.0018, 0.0034, 0.0022], dtype=np.float32) * b
+        sh_mult = np.array([1.0 - 0.08 * b, 1.0 + 0.025 * b, 1.0 + 0.015 * b], dtype=np.float32)
+        hi_mult = np.array([1.0 + 0.045 * b, 1.0 + 0.01 * b, 1.0 - 0.05 * b], dtype=np.float32)
+        shadow_veil = np.array([-0.0009, 0.0017, 0.0011], dtype=np.float32) * b
 
         xx_lin = np.linspace(0.0, 1.0, w, dtype=np.float32)[np.newaxis, :, np.newaxis]
-        side_spill = (np.clip((xx_lin - 0.58) / 0.42, 0.0, 1.0) ** 2.0)
-        neon_cast = np.array([0.0020, 0.0038, 0.0095], dtype=np.float32) * b
+        side_spill = (np.clip((xx_lin - 0.60) / 0.40, 0.0, 1.0) ** 2.0)
+        neon_cast = np.array([0.0010, 0.0018, 0.0045], dtype=np.float32) * b
 
         color_mult = (
             1.0

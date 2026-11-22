@@ -501,23 +501,23 @@ def analyze_and_build_auto_config(
             ),
         )
 
-    # Apply tasteful Flash Falloff + Dirty Bar Shadow Cast ONLY on dark/night scenes (never on bright daylight/mirror)
+    # Apply whisper-subtle Flash Falloff + Dirty Bar Shadow Cast ONLY on dark/night scenes (never on daylight/mirror)
     if auto_flash_cast:
         if archetype == "flash_party":
-            cfg.stage3_optics.flash_falloff = round(0.36 * min(1.25, strength) * glow_guard, 2)
-            cfg.stage3_optics.bar_shadow_cast = round(0.28 * min(1.25, strength), 2)
+            cfg.stage3_optics.flash_falloff = round(0.22 * min(1.25, strength) * glow_guard, 2)
+            cfg.stage3_optics.bar_shadow_cast = round(0.18 * min(1.25, strength), 2)
         elif archetype == "dark_night_moody":
-            cfg.stage3_optics.flash_falloff = round(0.20 * min(1.25, strength) * glow_guard, 2)
-            cfg.stage3_optics.bar_shadow_cast = round(0.24 * min(1.25, strength), 2)
+            cfg.stage3_optics.flash_falloff = round(0.12 * min(1.25, strength) * glow_guard, 2)
+            cfg.stage3_optics.bar_shadow_cast = round(0.15 * min(1.25, strength), 2)
         elif archetype == "warm_night":
-            cfg.stage3_optics.flash_falloff = round(0.18 * min(1.25, strength) * glow_guard, 2)
-            cfg.stage3_optics.bar_shadow_cast = round(0.14 * min(1.25, strength), 2)
+            cfg.stage3_optics.flash_falloff = round(0.10 * min(1.25, strength) * glow_guard, 2)
+            cfg.stage3_optics.bar_shadow_cast = round(0.08 * min(1.25, strength), 2)
 
-    # Apply subtle accidental phone tilt & off-center crop when enabled
+    # Apply very subtle accidental phone tilt & off-center crop when enabled
     if auto_tilt:
-        tilt_choices = [-2.2, 1.8, -1.6, 2.4, -2.5, 1.5]
+        tilt_choices = [-1.2, 1.0, -0.9, 1.3, -1.1, 0.8]
         cfg.stage5_compression.tilt_angle = tilt_choices[seed % len(tilt_choices)]
-        cfg.stage5_compression.crop_offset = 0.28 if archetype != "indoor_candid" else 0.18
+        cfg.stage5_compression.crop_offset = 0.14 if archetype != "indoor_candid" else 0.10
         cfg.stage5_compression.framing_seed = seed
 
     # Non-face filler photos (table, drinks, food, shoes, street) get cleaner object-centered focus
@@ -675,7 +675,7 @@ def build_carousel_plan_local(
     seen_in_group: Dict[int, int] = {}
     plan: List[Dict[str, Any]] = []
 
-    tilt_pool = [-2.1, 1.7, -1.5, 2.3, -1.9, 1.4]
+    tilt_pool = [-1.2, 1.0, -0.9, 1.3, -1.1, 0.8]
     for idx, (gid, an) in enumerate(zip(group_ids, analyses)):
         occ = seen_in_group.get(gid, 0)
         seen_in_group[gid] = occ + 1
@@ -694,10 +694,10 @@ def build_carousel_plan_local(
 
         if auto_tilt:
             base_tilt = tilt_pool[(gid + seed_offset) % len(tilt_pool)]
-            # Sequential shots in the same photoshoot get a tiny natural wrist shift (±0.5°), NOT wild flip
-            jitter = ((occ % 3) - 1) * 0.45 if vary_per_slide else 0.0
-            cfg.stage5_compression.tilt_angle = float(np.clip(base_tilt + jitter, -3.5, 3.5))
-            cfg.stage5_compression.crop_offset = 0.26 if an.archetype != "indoor_candid" else 0.16
+            # Sequential shots in the same photoshoot get a tiny natural wrist shift (±0.25°), never crooked
+            jitter = ((occ % 3) - 1) * 0.25 if vary_per_slide else 0.0
+            cfg.stage5_compression.tilt_angle = float(np.clip(base_tilt + jitter, -1.8, 1.8))
+            cfg.stage5_compression.crop_offset = 0.14 if an.archetype != "indoor_candid" else 0.10
         else:
             cfg.stage5_compression.tilt_angle = 0.0
             cfg.stage5_compression.crop_offset = 0.0

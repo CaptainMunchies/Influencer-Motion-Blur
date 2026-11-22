@@ -58,10 +58,10 @@ Return ONLY valid JSON matching this exact schema (all coordinates normalized 0 
     "focus_radius": 1.8,
     "glow_amount": 0.30,
     "grain_amount": 0.28,
-    "flash_falloff": 0.55,
-    "bar_shadow_cast": 0.50,
-    "tilt_angle": -1.8,
-    "crop_offset": 0.25
+    "flash_falloff": 0.22,
+    "bar_shadow_cast": 0.18,
+    "tilt_angle": -1.0,
+    "crop_offset": 0.12
   }
 }
 
@@ -70,11 +70,11 @@ Rules for maximum realism:
    - If one or more people/faces are clearly visible: set `scene_role` to `"portrait"` and trace ALL clearly visible faces in `keep_sharp_polygons` (do NOT intentionally blur out friends' faces in a group photo).
    - If NO face is visible: set `scene_role` to `"non_face_object"`, set `focus_center` on the main foreground hero object (e.g. cocktails, plate, reaching hand, pet, phone), trace that hero object in `keep_sharp_polygons`, and optionally trace empty dark background corners in `blur_polygons` (omit `pivot` for non-limb edges).
 2. In `blur_polygons` on portraits, trace moving outer limbs/arms/hands/gestures/hair without overlapping any face. Place `pivot` at the real shoulder or elbow joint `[px, py]` with natural `swing_angle_deg` (-14..+14).
-3. Be strict and realistic about lighting effects:
-   - `flash_falloff` (0.0..0.85): Use 0.35–0.75 ONLY on night/dim indoor flash scenes (hallways, bars, parties, dark tables). Set `0.0` on bright daylight, outdoor sun, or bright clean indoor/mirror shots!
-   - `bar_shadow_cast` (0.0..0.80): Use 0.30–0.70 ONLY on night bars, clubs, dim hallways, or late-night indoor scenes. Set `0.0` on bright daylight or clean daytime rooms!
-   - `tilt_angle` (-3.2..+3.2): Use subtle accidental phone tilt (±1.2° to ±2.6°) on candid shots; keep smaller (±0.5° to ±1.2°) on mirror selfies or architectural shots.
-   - `crop_offset` (0.0..0.45): Use 0.15–0.35 for casual off-center phone framing; 0.0–0.15 if the subject is already close to an edge.
+3. Be VERY restrained and whisper-subtle with lighting & framing effects (less is ALWAYS more realistic):
+   - `flash_falloff` (0.0..0.32): Use 0.12–0.28 ONLY on genuinely dark night/flash scenes (dim hallways, bars, clubs, dark tables). Set `0.0` on bright daylight, sunlit beaches/cars, or bright indoor/mirror shots!
+   - `bar_shadow_cast` (0.0..0.28): Use 0.10–0.24 ONLY on dark bars, clubs, or dim hallways. Set `0.0` on daylight, outdoor, or normal clean bedrooms/mirrors!
+   - `tilt_angle` (-1.5..+1.5): Use a barely-noticeable casual tilt (±0.6° to ±1.3°); keep ±0.0° to ±0.6° on mirror selfies or straight-line walls.
+   - `crop_offset` (0.0..0.20): Keep subtle (0.08–0.16) so you never crop off heads, hands, or edges.
 4. Pick `recommended_settings.motion_method`:
    - "flash_drag" for night/indoor flash, bars, parties, or flash table shots.
    - "pivot_swing" when hands/arms are clearly raised, waving, fixing hair, or gesturing.
@@ -111,9 +111,9 @@ Return ONLY valid JSON matching this exact schema:
     "hallway_night": {
       "label": "Night Hallway",
       "preset_id": "flash_party_blur",
-      "flash_falloff": 0.62,
-      "bar_shadow_cast": 0.58,
-      "base_tilt": -2.0
+      "flash_falloff": 0.22,
+      "bar_shadow_cast": 0.18,
+      "base_tilt": -1.0
     }
   },
   "slides": [
@@ -121,8 +121,8 @@ Return ONLY valid JSON matching this exact schema:
       "slide_number": 1,
       "scene_group": "hallway_night",
       "scene_role": "portrait" | "non_face_object",
-      "tilt_offset": -0.3,
-      "crop_offset": 0.25,
+      "tilt_offset": -0.2,
+      "crop_offset": 0.12,
       "note": "Short 5-8 word plain-English tag"
     }
   ]
@@ -579,8 +579,9 @@ def apply_director_guidance_to_config(
     result: AIDirectorResult,
     apply_slider_recommendations: bool = False,
     apply_realism_recommendations: bool = True,
+    apply_framing_recommendations: bool = False,
 ) -> PipelineConfig:
-    """Apply AI-detected focus center, arm pivots, realism extras (flash/cast/tilt), and optional sliders."""
+    """Apply AI-detected focus center, arm pivots, restrained realism extras, and optional sliders."""
     cfg = PipelineConfig.from_dict(config.to_dict())
     cfg.stage1_focus.focus_center_x = result.focus_center[0]
     cfg.stage1_focus.focus_center_y = result.focus_center[1]
@@ -591,13 +592,14 @@ def apply_director_guidance_to_config(
     rec = result.recommended_settings or {}
     if apply_realism_recommendations and rec:
         if "flash_falloff" in rec:
-            cfg.stage3_optics.flash_falloff = float(rec["flash_falloff"])
+            cfg.stage3_optics.flash_falloff = float(max(0.0, min(0.32, float(rec["flash_falloff"]))))
         if "bar_shadow_cast" in rec:
-            cfg.stage3_optics.bar_shadow_cast = float(rec["bar_shadow_cast"])
+            cfg.stage3_optics.bar_shadow_cast = float(max(0.0, min(0.28, float(rec["bar_shadow_cast"]))))
+    if apply_framing_recommendations and rec:
         if "tilt_angle" in rec:
-            cfg.stage5_compression.tilt_angle = float(rec["tilt_angle"])
+            cfg.stage5_compression.tilt_angle = float(max(-1.6, min(1.6, float(rec["tilt_angle"]))))
         if "crop_offset" in rec:
-            cfg.stage5_compression.crop_offset = float(rec["crop_offset"])
+            cfg.stage5_compression.crop_offset = float(max(0.0, min(0.20, float(rec["crop_offset"]))))
 
     if apply_slider_recommendations and rec:
         method = rec.get("motion_method")
@@ -719,15 +721,15 @@ def direct_carousel_with_ai(
 
         c = PipelineConfig.from_dict(base.to_dict())
         if auto_flash_cast:
-            c.stage3_optics.flash_falloff = float(g_meta.get("flash_falloff", 0.0))
-            c.stage3_optics.bar_shadow_cast = float(g_meta.get("bar_shadow_cast", 0.0))
+            c.stage3_optics.flash_falloff = float(max(0.0, min(0.32, float(g_meta.get("flash_falloff", 0.0)))))
+            c.stage3_optics.bar_shadow_cast = float(max(0.0, min(0.28, float(g_meta.get("bar_shadow_cast", 0.0)))))
         else:
             c.stage3_optics.flash_falloff = 0.0
             c.stage3_optics.bar_shadow_cast = 0.0
 
         group_cfgs[str(g_id)] = c.validated()
         group_labels[str(g_id)] = str(g_meta.get("label") or str(g_id).replace("_", " ").title())
-        group_base_tilt[str(g_id)] = float(g_meta.get("base_tilt", -1.6))
+        group_base_tilt[str(g_id)] = float(max(-1.4, min(1.4, float(g_meta.get("base_tilt", -1.0)))))
 
     plan: List[Dict[str, Any]] = []
     for idx, img in enumerate(images_rgb):
@@ -762,9 +764,9 @@ def direct_carousel_with_ai(
         c.stage5_compression.framing_seed = slide_seed + 37
 
         if auto_tilt:
-            jitter = float(s_meta.get("tilt_offset", 0.0)) if vary_per_slide else 0.0
-            c.stage5_compression.tilt_angle = float(np.clip(base_tilt + jitter, -3.5, 3.5))
-            c.stage5_compression.crop_offset = float(np.clip(float(s_meta.get("crop_offset", 0.24)), 0.0, 0.5))
+            jitter = float(max(-0.35, min(0.35, float(s_meta.get("tilt_offset", 0.0))))) if vary_per_slide else 0.0
+            c.stage5_compression.tilt_angle = float(np.clip(base_tilt + jitter, -1.7, 1.7))
+            c.stage5_compression.crop_offset = float(np.clip(float(s_meta.get("crop_offset", 0.13)), 0.0, 0.20))
         else:
             c.stage5_compression.tilt_angle = 0.0
             c.stage5_compression.crop_offset = 0.0

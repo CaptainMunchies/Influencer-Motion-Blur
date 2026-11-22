@@ -2090,8 +2090,8 @@ function bindEvents() {
   $("randomizeFramingBtn").addEventListener("click", () => {
     if (!state.config) return;
     const sign = Math.random() < 0.5 ? -1 : 1;
-    const tilt = Number((sign * (1.2 + Math.random() * 1.6)).toFixed(1));
-    const crop = Math.round(20 + Math.random() * 20);
+    const tilt = Number((sign * (0.7 + Math.random() * 0.9)).toFixed(1));
+    const crop = Math.round(10 + Math.random() * 12);
     state.config.stage5_compression.tilt_angle = tilt;
     state.config.stage5_compression.crop_offset = crop / 100.0;
     state.config.stage5_compression.framing_seed = Math.floor(Math.random() * 99999) + 1;

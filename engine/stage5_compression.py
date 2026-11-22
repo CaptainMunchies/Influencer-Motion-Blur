@@ -33,7 +33,7 @@ def _apply_accidental_phone_framing(
 
     # Exact minimum uniform zoom so rotated corners never expose out-of-frame pixels
     min_rot_zoom = max(cos_a + sin_a * (h / max(1.0, float(w))), cos_a + sin_a * (w / max(1.0, float(h))))
-    extra_crop_zoom = 1.0 + 0.095 * crop_offset
+    extra_crop_zoom = 1.0 + 0.048 * crop_offset
     zoom = min_rot_zoom * extra_crop_zoom
 
     # Deterministic casual off-center shift bounded safely inside the zoom margin
